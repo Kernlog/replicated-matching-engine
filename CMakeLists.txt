@@ -29,3 +29,5 @@ if(BUILD_TESTING)
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
 endif()
+
+add_subdirectory(core)
