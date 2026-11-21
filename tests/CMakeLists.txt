@@ -6,3 +6,4 @@ function(rme_add_test name)
 endfunction()
 
 add_subdirectory(core)
+add_subdirectory(engine)
