@@ -57,6 +57,10 @@ class OrderBook {
 
   void on(const LimitOrder& order, std::vector<Event>& out);
   void rest(Side side, const RestingOrder& order);
+  [[nodiscard]] bool crossed() const noexcept;
+
+  template <typename Levels, typename Crosses>
+  Qty match(Levels& levels, OrderId taker, Qty qty, Crosses crosses, std::vector<Event>& out);
 
   Bids bids_;
   Asks asks_;
