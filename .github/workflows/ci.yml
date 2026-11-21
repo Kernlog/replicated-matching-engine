@@ -35,3 +35,18 @@ jobs:
       - run: cmake --preset release
       - run: cmake --build --preset release
       - run: ctest --preset release
+
+  asan:
+    name: asan-ubsan
+    runs-on: ubuntu-24.04
+    env:
+      CXX: clang++-18
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: clang-asan
+      - run: cmake --preset asan
+      - run: cmake --build --preset asan
+      - run: ctest --preset asan
