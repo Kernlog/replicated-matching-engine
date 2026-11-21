@@ -1,0 +1,4 @@
+InheritParentConfig: true
+Checks: >
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -readability-function-cognitive-complexity
