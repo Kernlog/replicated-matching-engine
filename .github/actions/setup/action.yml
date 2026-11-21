@@ -1,0 +1,24 @@
+name: setup
+description: Install toolchain, vcpkg and build caches
+inputs:
+  cache-key:
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: sudo apt-get update -q && sudo apt-get install -y -q ninja-build clang-18 clang-tidy-18 clang-format-18
+    - uses: actions/checkout@v7
+      with:
+        repository: microsoft/vcpkg
+        ref: ${{ env.VCPKG_COMMIT }}
+        path: vcpkg
+    - shell: bash
+      run: ./vcpkg/bootstrap-vcpkg.sh -disableMetrics && mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+    - uses: actions/cache@v6
+      with:
+        path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+        key: vcpkg-${{ inputs.cache-key }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}
+    - uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: ccache-${{ inputs.cache-key }}
