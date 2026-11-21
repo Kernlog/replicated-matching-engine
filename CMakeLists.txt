@@ -23,3 +23,9 @@ target_compile_options(rme_options INTERFACE
   $<$<BOOL:${RME_ARCH}>:-march=${RME_ARCH}>
   $<$<CONFIG:Release>:-fno-plt>)
 target_include_directories(rme_options INTERFACE ${PROJECT_SOURCE_DIR})
+
+include(CTest)
+if(BUILD_TESTING)
+  find_package(GTest CONFIG REQUIRED)
+  include(GoogleTest)
+endif()
