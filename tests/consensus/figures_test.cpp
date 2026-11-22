@@ -53,7 +53,7 @@ TEST(FiguresTest, Figure7LeaderRepairsEveryFollower) {
       {"e", {1, 1, 1, 4, 4, 4, 4}},
       {"f", {1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3}},
   };
-  Cluster cluster(7);
+  Cluster cluster(7, 1, 64, false);
   cluster.load(1, 7, leader_log);
   for (std::uint32_t i = 0; i < followers.size(); ++i) {
     cluster.load(i + 2, 7, followers[i].log);
@@ -94,7 +94,7 @@ void reach_figure8_c(Cluster& cluster) {
 }
 
 TEST(FiguresTest, Figure8OldTermEntryOnMajorityIsNotCommitted) {
-  Cluster cluster(5, 1, 1);
+  Cluster cluster(5, 1, 1, false);
   reach_figure8_c(cluster);
   EXPECT_LT(cluster.node(1).commit(), Index(2));
 
@@ -116,7 +116,7 @@ TEST(FiguresTest, Figure8OldTermEntryOnMajorityIsNotCommitted) {
 }
 
 TEST(FiguresTest, Figure8CurrentTermEntryOnMajorityCommitsBoth) {
-  Cluster cluster(5, 1, 1);
+  Cluster cluster(5, 1, 1, false);
   reach_figure8_c(cluster);
   cluster.deliver();
   cluster.tick_all();

@@ -32,7 +32,11 @@ void Raft::tick() {
     return;
   }
   if (elapsed_ >= timeout_) {
-    campaign();
+    if (config_.pre_vote) {
+      pre_campaign();
+    } else {
+      campaign();
+    }
   }
 }
 
@@ -42,12 +46,21 @@ void Raft::step(const Message& message) {
     ++dropped_;
     return;
   }
+  const auto* vote_request = std::get_if<VoteRequest>(&message.body);
+  const auto* vote_response = std::get_if<VoteResponse>(&message.body);
+  const bool pre_vote_request = vote_request != nullptr && vote_request->pre_vote;
+  const bool pre_vote_grant =
+      vote_response != nullptr && vote_response->pre_vote && vote_response->granted;
   if (message.term > term_) {
-    const bool from_leader = std::holds_alternative<AppendRequest>(message.body);
-    become_follower(message.term, from_leader ? std::optional(message.from) : std::nullopt);
+    if (!pre_vote_request && !pre_vote_grant) {
+      const bool from_leader = std::holds_alternative<AppendRequest>(message.body);
+      become_follower(message.term, from_leader ? std::optional(message.from) : std::nullopt);
+    }
   } else if (message.term < term_) {
     if (std::holds_alternative<AppendRequest>(message.body)) {
       send(message.from, AppendResponse{});
+    } else if (pre_vote_request) {
+      send(message.from, VoteResponse{false, true});
     }
     return;
   }
@@ -98,6 +111,24 @@ void Raft::become_follower(Term term, std::optional<NodeId> leader) {
   reset_election_timer();
 }
 
+// A pre-election at term + 1 that changes no state, so a node that cannot reach a quorum (or
+// rejoins while the leader is healthy) never bumps the term and deposes a working leader.
+void Raft::pre_campaign() {
+  role_ = Role::kPreCandidate;
+  leader_.reset();
+  granted_ = {config_.id};
+  reset_election_timer();
+  if (is_quorum(granted_.size())) {
+    campaign();
+    return;
+  }
+  for (const NodeId peer : config_.members) {
+    if (peer != config_.id) {
+      send(peer, VoteRequest{log_.last_index(), log_.last_term(), true}, term_ + Term(1));
+    }
+  }
+}
+
 void Raft::campaign() {
   role_ = Role::kCandidate;
   term_ += Term(1);
@@ -111,7 +142,7 @@ void Raft::campaign() {
   }
   for (const NodeId peer : config_.members) {
     if (peer != config_.id) {
-      send(peer, VoteRequest{log_.last_index(), log_.last_term()});
+      send(peer, VoteRequest{log_.last_index(), log_.last_term(), false});
     }
   }
 }
@@ -173,7 +204,15 @@ void Raft::reset_election_timer() {
 }
 
 void Raft::send(NodeId to, Body body) {
-  outbox_.push_back(Message{config_.id, to, term_, std::move(body)});
+  send(to, std::move(body), term_);
+}
+
+void Raft::send(NodeId to, Body body, Term term) {
+  outbox_.push_back(Message{config_.id, to, term, std::move(body)});
+}
+
+bool Raft::in_leader_lease() const noexcept {
+  return leader_.has_value() && elapsed_ < config_.election_ticks;
 }
 
 bool Raft::is_quorum(std::size_t count) const noexcept {
@@ -184,21 +223,32 @@ void Raft::on(const Message& message, const VoteRequest& request) {
   const bool up_to_date =
       request.last_term > log_.last_term() ||
       (request.last_term == log_.last_term() && request.last_index >= log_.last_index());
+  if (request.pre_vote) {
+    const bool grant = up_to_date && message.term > term_ && !in_leader_lease();
+    send(message.from, VoteResponse{grant, true}, grant ? message.term : term_);
+    return;
+  }
   const bool grant = up_to_date && (!vote_ || *vote_ == message.from);
   if (grant) {
     vote_ = message.from;
     reset_election_timer();
   }
-  send(message.from, VoteResponse{grant});
+  send(message.from, VoteResponse{grant, false});
 }
 
 void Raft::on(const Message& message, const VoteResponse& response) {
-  if (role_ != Role::kCandidate || !response.granted ||
+  const Role expected = response.pre_vote ? Role::kPreCandidate : Role::kCandidate;
+  if (role_ != expected || !response.granted ||
       std::ranges::find(granted_, message.from) != granted_.end()) {
     return;
   }
   granted_.push_back(message.from);
-  if (is_quorum(granted_.size())) {
+  if (!is_quorum(granted_.size())) {
+    return;
+  }
+  if (response.pre_vote) {
+    campaign();
+  } else {
     become_leader();
   }
 }

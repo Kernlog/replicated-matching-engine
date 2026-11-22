@@ -51,10 +51,10 @@ TEST(ReadyTest, EmptyOnlyWithoutAnyEffect) {
 }
 
 TEST(MessageTest, ComparesBodies) {
-  const Message vote{NodeId(1), NodeId(2), Term(3), VoteRequest{Index(4), Term(2)}};
+  const Message vote{NodeId(1), NodeId(2), Term(3), VoteRequest{Index(4), Term(2), false}};
   Message other = vote;
   EXPECT_EQ(vote, other);
-  other.body = VoteResponse{true};
+  other.body = VoteResponse{true, false};
   EXPECT_NE(vote, other);
 }
 

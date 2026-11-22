@@ -18,9 +18,10 @@ struct RaftConfig {
   std::uint32_t heartbeat_ticks = 1;
   std::uint64_t seed = 1;
   std::size_t max_entries_per_append = 64;
+  bool pre_vote = true;
 };
 
-enum class Role : std::uint8_t { kFollower, kCandidate, kLeader };
+enum class Role : std::uint8_t { kFollower, kPreCandidate, kCandidate, kLeader };
 
 class Raft {
  public:
@@ -44,6 +45,7 @@ class Raft {
 
  private:
   void become_follower(Term term, std::optional<NodeId> leader);
+  void pre_campaign();
   void campaign();
   void become_leader();
   struct Progress {
@@ -58,6 +60,8 @@ class Raft {
   void maybe_commit();
   void reset_election_timer();
   void send(NodeId to, Body body);
+  void send(NodeId to, Body body, Term term);
+  [[nodiscard]] bool in_leader_lease() const noexcept;
   [[nodiscard]] bool is_quorum(std::size_t count) const noexcept;
   [[nodiscard]] HardState hard_state() const noexcept { return {term_, vote_}; }
 

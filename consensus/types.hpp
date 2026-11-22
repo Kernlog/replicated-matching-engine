@@ -45,12 +45,14 @@ struct HardState {
 struct VoteRequest {
   Index last_index;
   Term last_term;
+  bool pre_vote = false;
 
   friend bool operator==(const VoteRequest&, const VoteRequest&) = default;
 };
 
 struct VoteResponse {
   bool granted = false;
+  bool pre_vote = false;
 
   friend bool operator==(const VoteResponse&, const VoteResponse&) = default;
 };
