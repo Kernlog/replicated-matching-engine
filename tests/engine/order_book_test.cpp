@@ -301,5 +301,23 @@ TEST(OrderBookCapacityTest, RejectsRestingOrdersWhenPoolIsFullAndReusesFreedSlot
   EXPECT_EQ(book.size(), 2U);
 }
 
+TEST(OrderBookBandTest, RejectsPricesOutsideTheConfiguredBand) {
+  OrderBook book(BookConfig{.min_price = Price(1000), .price_levels = 64});
+  std::vector<Event> out;
+  book.apply(LimitOrder{OrderId(1), Side::kBuy, Price(999), Qty(1)}, out);
+  book.apply(LimitOrder{OrderId(2), Side::kBuy, Price(1064), Qty(1)}, out);
+  book.apply(LimitOrder{OrderId(3), Side::kBuy, Price(1000), Qty(1)}, out);
+  book.apply(LimitOrder{OrderId(4), Side::kSell, Price(1063), Qty(1)}, out);
+  EXPECT_EQ(out, (std::vector<Event>{Rejected{OrderId(1), RejectReason::kInvalidPrice},
+                                     Rejected{OrderId(2), RejectReason::kInvalidPrice},
+                                     Accepted{OrderId(3)}, Accepted{OrderId(4)}}));
+  EXPECT_EQ(book.best_bid(), Price(1000));
+  EXPECT_EQ(book.best_ask(), Price(1063));
+}
+
+TEST(OrderBookBandDeathTest, RejectsNonPositiveMinPriceAtConstruction) {
+  EXPECT_DEATH(OrderBook(BookConfig{.min_price = Price(0)}), "min_price > Price\\(0\\)");
+}
+
 }  // namespace
 }  // namespace rme::engine

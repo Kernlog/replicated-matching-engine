@@ -2,8 +2,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <functional>
-#include <map>
 #include <optional>
 #include <vector>
 
@@ -12,11 +10,14 @@
 #include "engine/event.hpp"
 #include "engine/order_index.hpp"
 #include "engine/order_pool.hpp"
+#include "engine/price_ladder.hpp"
 
 namespace rme::engine {
 
 struct BookConfig {
   std::uint32_t max_orders = 1U << 16U;
+  Price min_price = Price(1);
+  std::uint32_t price_levels = 1U << 16U;
 };
 
 class OrderBook {
@@ -31,26 +32,20 @@ class OrderBook {
 
   template <typename F>
   void for_each(Side side, F fn) const {
+    const auto visit_level = [&](std::uint32_t slot) {
+      const Level& level = side == Side::kBuy ? bids_[slot] : asks_[slot];
+      for (std::uint32_t i = level.head; i != kNil; i = pool_[i].next) {
+        fn(pool_[i].order);
+      }
+    };
     if (side == Side::kBuy) {
-      visit(bids_, fn);
+      bids_.for_each_descending(visit_level);
     } else {
-      visit(asks_, fn);
+      asks_.for_each_ascending(visit_level);
     }
   }
 
  private:
-  using Bids = std::map<Price, Level, std::greater<>>;
-  using Asks = std::map<Price, Level, std::less<>>;
-
-  template <typename Levels, typename F>
-  void visit(const Levels& levels, F& fn) const {
-    for (const auto& [price, level] : levels) {
-      for (std::uint32_t i = level.head; i != kNil; i = pool_[i].next) {
-        fn(pool_[i].order);
-      }
-    }
-  }
-
   void on(const LimitOrder& order, std::vector<Event>& out);
   void on(const MarketOrder& order, std::vector<Event>& out);
   void on(const Cancel& cancel, std::vector<Event>& out);
@@ -59,19 +54,22 @@ class OrderBook {
   void rest(Side side, const RestingOrder& order);
   RestingOrder remove(std::uint32_t index);
   [[nodiscard]] bool crossed() const noexcept;
+  [[nodiscard]] bool in_band(Price price) const noexcept;
+  [[nodiscard]] std::uint32_t slot(Price price) const noexcept;
+  [[nodiscard]] Price price_at(std::uint32_t slot) const noexcept;
+  [[nodiscard]] std::optional<RejectReason> invalid(std::optional<Price> price,
+                                                    Qty qty) const noexcept;
   [[nodiscard]] std::optional<RejectReason> reject_reason(OrderId id, std::optional<Price> price,
-                                                          Qty qty) const;
+                                                          Qty qty) const noexcept;
 
-  template <typename Levels>
-  void unlink(Levels& levels, std::uint32_t index);
+  template <typename Crosses>
+  Qty match(Side taker_side, OrderId taker, Qty qty, Crosses crosses, std::vector<Event>& out);
 
-  template <typename Levels, typename Crosses>
-  Qty match(Levels& levels, OrderId taker, Qty qty, Crosses crosses, std::vector<Event>& out);
-
+  BookConfig config_;
   OrderPool pool_;
-  Bids bids_;
-  Asks asks_;
   OrderIndex index_;
+  PriceLadder bids_;
+  PriceLadder asks_;
 };
 
 }  // namespace rme::engine
