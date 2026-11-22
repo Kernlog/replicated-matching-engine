@@ -138,5 +138,15 @@ TEST(ElectionTest, HardStateIsEmittedOncePerChange) {
   EXPECT_FALSE(raft.ready().hard_state.has_value());
 }
 
+TEST(ElectionTest, DropsMessagesFromNonMembersOrForOtherNodes) {
+  Raft raft = follower();
+  raft.step({NodeId(9), NodeId(1), Term(5), VoteRequest{}});
+  raft.step({NodeId(2), NodeId(3), Term(5), VoteRequest{}});
+  raft.step({NodeId(1), NodeId(1), Term(5), VoteRequest{}});
+  EXPECT_EQ(raft.dropped(), 3U);
+  EXPECT_EQ(raft.term(), Term(0));
+  EXPECT_FALSE(raft.has_ready());
+}
+
 }  // namespace
 }  // namespace rme::consensus
