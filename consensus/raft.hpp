@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 #include "consensus/raft_log.hpp"
@@ -18,6 +19,7 @@ struct RaftConfig {
   std::uint32_t heartbeat_ticks = 1;
   std::uint64_t seed = 1;
   std::size_t max_entries_per_append = 64;
+  std::size_t max_entry_bytes = std::size_t{64} << 10U;
   bool pre_vote = true;
   bool check_quorum = true;
 };
@@ -30,8 +32,9 @@ class Raft {
 
   void tick();
   void step(const Message& message);
-  // Appends to the leader's log; nullopt when this node is not the leader.
-  std::optional<Index> propose(std::vector<std::byte> data);
+  // Buffers a command on the leader; commands are packed into one entry per Ready, up to
+  // max_entry_bytes. Returns false when this node is not the leader.
+  bool propose(std::span<const std::byte> command);
 
   [[nodiscard]] bool has_ready() const noexcept;
   Ready ready();
@@ -46,6 +49,7 @@ class Raft {
 
  private:
   void become_follower(Term term, std::optional<NodeId> leader);
+  void flush_proposals();
   void pre_campaign();
   void campaign();
   void become_leader();
@@ -86,6 +90,7 @@ class Raft {
   std::uint32_t quorum_elapsed_ = 0;
   std::vector<NodeId> granted_;
   std::vector<Message> outbox_;
+  std::vector<std::byte> pending_;
   std::vector<Progress> progress_;
   std::vector<Index> matches_;
   Index commit_;

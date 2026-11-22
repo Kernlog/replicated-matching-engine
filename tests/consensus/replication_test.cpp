@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 
 #include "consensus/raft.hpp"
@@ -35,7 +36,8 @@ TEST(ReplicationTest, FollowersReceiveProposalsInOrder) {
 TEST(ReplicationTest, FollowerRejectsProposals) {
   Cluster cluster(3);
   const std::uint32_t leader = elect(cluster);
-  EXPECT_FALSE(cluster.node(other(leader)).propose({std::byte{1}}).has_value());
+  const std::array payload{std::byte{1}};
+  EXPECT_FALSE(cluster.node(other(leader)).propose(payload));
 }
 
 TEST(ReplicationTest, LaggingFollowerCatchesUpBeyondOneBatch) {
