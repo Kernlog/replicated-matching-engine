@@ -70,6 +70,38 @@ void OrderBook::on(const MarketOrder& order, std::vector<Event>& out) {
   }
 }
 
+void OrderBook::on(const Cancel& cancel, std::vector<Event>& out) {
+  const auto found = index_.find(cancel.id);
+  if (found == index_.end()) {
+    out.emplace_back(Rejected{cancel.id, RejectReason::kUnknownOrder});
+    return;
+  }
+  const RestingOrder removed = remove(found);
+  out.emplace_back(Cancelled{removed.id, removed.qty});
+}
+
+template <typename Levels>
+void OrderBook::unlink(Levels& levels, Queue::iterator it) {
+  const auto level = levels.find(it->price);
+  RME_ASSERT(level != levels.end());
+  level->second.erase(it);
+  if (level->second.empty()) {
+    levels.erase(level);
+  }
+}
+
+RestingOrder OrderBook::remove(std::map<OrderId, Locator>::iterator found) {
+  const auto [side, it] = found->second;
+  const RestingOrder order = *it;
+  if (side == Side::kBuy) {
+    unlink(bids_, it);
+  } else {
+    unlink(asks_, it);
+  }
+  index_.erase(found);
+  return order;
+}
+
 void OrderBook::rest(Side side, const RestingOrder& order) {
   auto& queue = side == Side::kBuy ? bids_[order.price] : asks_[order.price];
   queue.push_back(order);

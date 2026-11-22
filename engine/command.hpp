@@ -23,6 +23,12 @@ struct MarketOrder {
   friend bool operator==(const MarketOrder&, const MarketOrder&) = default;
 };
 
-using Command = std::variant<LimitOrder, MarketOrder>;
+struct Cancel {
+  OrderId id;
+
+  friend bool operator==(const Cancel&, const Cancel&) = default;
+};
+
+using Command = std::variant<LimitOrder, MarketOrder, Cancel>;
 
 }  // namespace rme::engine

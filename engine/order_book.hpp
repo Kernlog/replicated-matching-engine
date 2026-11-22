@@ -57,7 +57,12 @@ class OrderBook {
 
   void on(const LimitOrder& order, std::vector<Event>& out);
   void on(const MarketOrder& order, std::vector<Event>& out);
+  void on(const Cancel& cancel, std::vector<Event>& out);
   void rest(Side side, const RestingOrder& order);
+  RestingOrder remove(std::map<OrderId, Locator>::iterator found);
+
+  template <typename Levels>
+  static void unlink(Levels& levels, Queue::iterator it);
   [[nodiscard]] bool crossed() const noexcept;
 
   template <typename Levels, typename Crosses>
