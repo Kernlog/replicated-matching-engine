@@ -51,6 +51,13 @@ TEST(DeterminismTest, DifferentSeedsYieldDifferentHashes) {
   EXPECT_EQ(hashes.size(), kSeeds);
 }
 
+TEST(DeterminismTest, FaultySeedsKeepEverySafetyInvariant) {
+  for (std::uint64_t seed = 1; seed <= 64; ++seed) {
+    const SimStats stats = simulate(seed);
+    EXPECT_TRUE(stats.violations.empty()) << "seed " << seed << ": " << stats.violations.front();
+  }
+}
+
 TEST(DeterminismTest, TraceCoversFaultsCrashesAndCommits) {
   const SimStats stats = simulate(1);
   EXPECT_GT(stats.delivered, 10000U);

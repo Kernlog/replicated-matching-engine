@@ -30,6 +30,7 @@ void Cluster::Wire::send(consensus::Message&& message) const {
 void Cluster::Applier::apply(const consensus::Entry& entry) const {
   if (!disk->crashed()) {
     machine->apply(entry);
+    checker->on_applied(node, entry, machine->book_hash());
   }
 }
 
@@ -41,7 +42,9 @@ Cluster::Cluster(const SimConfig& config)
       workload_(rng_.next()),
       machines_(config.nodes),
       up_(config.nodes, true),
-      down_until_(config.nodes) {
+      down_until_(config.nodes),
+      roles_(config.nodes, consensus::Role::kFollower),
+      checker_(config.nodes) {
   const auto members = member_ids(config.nodes);
   configs_.reserve(members.size());
   nodes_.reserve(members.size());
@@ -55,13 +58,22 @@ Cluster::Cluster(const SimConfig& config)
 }
 
 SimStats Cluster::run() {
-  while (const auto event = queue_.pop_until(config_.duration)) {
+  while (checker_.ok()) {
+    const auto event = queue_.pop_until(config_.duration);
+    if (!event) {
+      break;
+    }
     if (const auto* tick = std::get_if<Tick>(&*event)) {
       on_tick(*tick);
     } else {
       on_delivery(std::get<Delivery>(*event).message);
     }
+    if (++events_ % 1024 == 0) {
+      check_logs();
+    }
   }
+  check_logs();
+  stats_.violations = checker_.violations();
   stats_.network = network_.stats();
   for (const EngineMachine& machine : machines_) {
     trace_.add(machine.applied().value());
@@ -120,15 +132,41 @@ void Cluster::process(std::size_t i) {
   if (roll(config_.faults.sync_crash_one_in)) {
     disks_[i].crash_on_next_sync(config_.faults.torn_writes ? Crash::kTornTail : Crash::kClean);
   }
+  observe(i);
   const std::uint64_t before = machines_[i].applied().value();
   Wire wire{&network_, &disks_[i]};
-  Applier applier{&machines_[i], &disks_[i]};
+  Applier applier{&machines_[i], &disks_[i], &checker_, nodes_[i].id()};
   consensus::process_ready(nodes_[i], disks_[i], wire, applier);
   stats_.applied += machines_[i].applied().value() - before;
   if (disks_[i].crashed()) {
     ++stats_.sync_crashes;
     crash(i, Crash::kClean);
+    return;
   }
+  observe(i);
+}
+
+void Cluster::observe(std::size_t i) {
+  const consensus::Raft& raft = nodes_[i];
+  checker_.on_commit(raft.id(), raft.commit());
+  if (raft.role() == consensus::Role::kLeader) {
+    if (roles_[i] != consensus::Role::kLeader) {
+      checker_.on_leader(raft.id(), raft.term(), raft.log());
+    }
+    checker_.on_leader_commit(raft.term(), raft.commit(), raft.log());
+  }
+  roles_[i] = raft.role();
+}
+
+void Cluster::check_logs() {
+  std::vector<const consensus::RaftLog*> logs;
+  logs.reserve(nodes_.size());
+  for (std::size_t i = 0; i < nodes_.size(); ++i) {
+    if (up_[i]) {
+      logs.push_back(&nodes_[i].log());
+    }
+  }
+  checker_.check_log_matching(logs);
 }
 
 void Cluster::crash(std::size_t i, Crash mode) {
@@ -148,6 +186,8 @@ void Cluster::restart(std::size_t i) {
   machines_[i] = EngineMachine{};
   configs_[i].seed = rng_.next();
   nodes_[i] = consensus::Raft(configs_[i], disks_[i].state(), disks_[i].entries());
+  roles_[i] = consensus::Role::kFollower;
+  checker_.on_restart(nodes_[i].id());
 }
 
 bool Cluster::roll(std::uint32_t one_in) {
