@@ -34,7 +34,7 @@ void Raft::tick() {
     }
     if (elapsed_ >= config_.heartbeat_ticks) {
       elapsed_ = 0;
-      broadcast_append();
+      broadcast_heartbeat();
     }
     return;
   }
@@ -205,18 +205,66 @@ void Raft::become_leader() {
 }
 
 void Raft::broadcast_append() {
-  for (const Progress& peer : progress_) {
+  for (Progress& peer : progress_) {
     if (peer.id != config_.id) {
-      send_append(peer);
+      replicate(peer);
     }
   }
 }
 
-void Raft::send_append(const Progress& peer) {
+void Raft::broadcast_heartbeat() {
+  for (Progress& peer : progress_) {
+    if (peer.id != config_.id) {
+      heartbeat(peer);
+    }
+  }
+}
+
+// Probing: one AppendEntries outstanding until the follower's position is known. Replicating:
+// next advances optimistically with up to max_inflight batches in flight.
+void Raft::replicate(Progress& peer) {
+  if (peer.probing) {
+    if (!peer.probe_sent) {
+      send_entries(peer);
+      peer.probe_sent = true;
+    }
+    return;
+  }
+  const Index window(std::uint64_t{config_.max_inflight} * config_.max_entries_per_append);
+  while (peer.next <= log_.last_index() && peer.next - peer.match - Index(1) < window) {
+    peer.next += Index(send_entries(peer));
+  }
+}
+
+// Heartbeats carry the commit index from the last known match. A follower that makes no
+// progress for an election timeout is probed again, so lost appends cannot wedge it.
+void Raft::heartbeat(Progress& peer) {
+  if (peer.probing) {
+    peer.probe_sent = false;
+    replicate(peer);
+    return;
+  }
+  if (peer.next > peer.match + Index(1) && ++peer.stalled_ticks >= config_.election_ticks) {
+    probe_from(peer, peer.match + Index(1));
+    return;
+  }
+  send(peer.id, AppendRequest{peer.match, log_.term_at(peer.match).value_or(Term(0)), {}, commit_});
+}
+
+void Raft::probe_from(Progress& peer, Index next) {
+  peer.next = next;
+  peer.probing = true;
+  peer.probe_sent = false;
+  peer.stalled_ticks = 0;
+  replicate(peer);
+}
+
+std::size_t Raft::send_entries(const Progress& peer) {
   const Index prev = peer.next - Index(1);
   const auto entries = log_.slice(peer.next, config_.max_entries_per_append);
   send(peer.id, AppendRequest{prev, log_.term_at(prev).value_or(Term(0)),
                               std::vector<Entry>(entries.begin(), entries.end()), commit_});
+  return entries.size();
 }
 
 // Only an entry from the current term is committed by counting replicas (paper section 5.4.2);
@@ -320,12 +368,14 @@ void Raft::on(const Message& message, const AppendResponse& response) {
   }
   Progress& peer = progress_of(message.from);
   if (response.success) {
-    peer.match = std::max(peer.match, response.match);
-    peer.next = std::max(peer.next, peer.match + Index(1));
-    maybe_commit();
-    if (peer.next <= log_.last_index()) {
-      send_append(peer);
+    if (response.match > peer.match) {
+      peer.match = response.match;
+      peer.stalled_ticks = 0;
     }
+    peer.next = std::max(peer.next, peer.match + Index(1));
+    peer.probing = false;
+    maybe_commit();
+    replicate(peer);
     return;
   }
   Index hinted = response.conflict_index;
@@ -334,8 +384,7 @@ void Raft::on(const Message& message, const AppendResponse& response) {
       hinted = *last + Index(1);
     }
   }
-  peer.next = std::max(peer.match + Index(1), std::min(hinted, peer.next - Index(1)));
-  send_append(peer);
+  probe_from(peer, std::max(peer.match + Index(1), std::min(hinted, peer.next - Index(1))));
 }
 
 }  // namespace rme::consensus

@@ -20,6 +20,7 @@ struct RaftConfig {
   std::uint64_t seed = 1;
   std::size_t max_entries_per_append = 64;
   std::size_t max_entry_bytes = std::size_t{64} << 10U;
+  std::uint32_t max_inflight = 8;
   bool pre_vote = true;
   bool check_quorum = true;
 };
@@ -58,11 +59,18 @@ class Raft {
     Index next;
     Index match;
     bool recent_active = false;
+    bool probing = true;
+    bool probe_sent = false;
+    std::uint32_t stalled_ticks = 0;
   };
 
   void check_quorum();
   void broadcast_append();
-  void send_append(const Progress& peer);
+  void broadcast_heartbeat();
+  void replicate(Progress& peer);
+  void heartbeat(Progress& peer);
+  void probe_from(Progress& peer, Index next);
+  std::size_t send_entries(const Progress& peer);
   Progress& progress_of(NodeId id);
   void maybe_commit();
   void reset_election_timer();

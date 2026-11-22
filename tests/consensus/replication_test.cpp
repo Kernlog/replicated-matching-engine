@@ -48,9 +48,8 @@ TEST(ReplicationTest, LaggingFollowerCatchesUpBeyondOneBatch) {
   cluster.propose(leader, 200);
   EXPECT_EQ(cluster.node(lagging).log().last_index(), Index(1));
   cluster.heal();
-  cluster.tick_all();
+  EXPECT_TRUE(cluster.run_until([&] { return cluster.logs_converged(); }, 50));
   EXPECT_EQ(cluster.leader_id(), leader);
-  EXPECT_TRUE(cluster.logs_converged());
 }
 
 TEST(ReplicationTest, DeposedLeaderLosesItsUnreplicatedSuffix) {
