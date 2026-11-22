@@ -2,7 +2,7 @@
 set -euo pipefail
 
 dirs=()
-for d in core engine consensus sim; do
+for d in core engine codec consensus sim; do
   [[ -d $d ]] && dirs+=("$d")
 done
 [[ ${#dirs[@]} -eq 0 ]] && exit 0
