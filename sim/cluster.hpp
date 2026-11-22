@@ -2,12 +2,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "consensus/raft.hpp"
 #include "consensus/types.hpp"
 #include "core/hash.hpp"
 #include "core/rng.hpp"
+#include "sim/checker.hpp"
 #include "sim/clock.hpp"
 #include "sim/disk.hpp"
 #include "sim/engine_machine.hpp"
@@ -50,6 +52,7 @@ struct SimStats {
   std::uint64_t crashes = 0;
   std::uint64_t sync_crashes = 0;
   NetworkStats network;
+  std::vector<std::string> violations;
 };
 
 // N Raft nodes running the matching engine over the fake clock, network and disks. Every choice
@@ -65,17 +68,20 @@ class Cluster {
   [[nodiscard]] const EngineMachine& machine(std::size_t i) const { return machines_.at(i); }
   [[nodiscard]] bool up(std::size_t i) const { return up_.at(i); }
   [[nodiscard]] Time now() const noexcept { return queue_.now(); }
+  [[nodiscard]] const Checker& checker() const noexcept { return checker_; }
 
  private:
   struct Wire {
-    Network* network;
-    const Disk* disk;
+    Network* network = nullptr;
+    const Disk* disk = nullptr;
     void send(consensus::Message&& message) const;
   };
 
   struct Applier {
-    EngineMachine* machine;
-    const Disk* disk;
+    EngineMachine* machine = nullptr;
+    const Disk* disk = nullptr;
+    Checker* checker = nullptr;
+    consensus::NodeId node;
     void apply(const consensus::Entry& entry) const;
   };
 
@@ -83,6 +89,8 @@ class Cluster {
   void on_delivery(const consensus::Message& message);
   void propose(std::size_t i);
   void process(std::size_t i);
+  void observe(std::size_t i);
+  void check_logs();
   void crash(std::size_t i, Crash mode);
   void restart(std::size_t i);
   [[nodiscard]] bool roll(std::uint32_t one_in);
@@ -99,6 +107,9 @@ class Cluster {
   std::vector<EngineMachine> machines_;
   std::vector<bool> up_;
   std::vector<Time> down_until_;
+  std::vector<consensus::Role> roles_;
+  Checker checker_;
+  std::uint64_t events_ = 0;
   Hasher trace_;
   SimStats stats_;
 };
