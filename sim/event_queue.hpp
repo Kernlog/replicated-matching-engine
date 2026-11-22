@@ -24,13 +24,19 @@ struct Tick {
   friend bool operator==(const Tick&, const Tick&) = default;
 };
 
-using Event = std::variant<Tick>;
+struct Delivery {
+  consensus::Message message;
+
+  friend bool operator==(const Delivery&, const Delivery&) = default;
+};
+
+using Event = std::variant<Tick, Delivery>;
 
 class EventQueue {
  public:
   // Events due at the same time pop in the order they were scheduled.
   void schedule(Time at, Event event);
-  void after(Time delay, Event event) { schedule(now_ + delay, event); }
+  void after(Time delay, Event event) { schedule(now_ + delay, std::move(event)); }
 
   // Pops the earliest event due at or before end and moves now() to it; otherwise moves now() to
   // end and returns nullopt.
