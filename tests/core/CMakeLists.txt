@@ -1,1 +1,1 @@
-rme_add_test(core_test SOURCES strong_test.cpp assert_test.cpp LIBS rme_core)
+rme_add_test(core_test SOURCES strong_test.cpp assert_test.cpp rng_test.cpp LIBS rme_core)
