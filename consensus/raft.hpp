@@ -39,6 +39,8 @@ class Raft {
 
   [[nodiscard]] bool has_ready() const noexcept;
   Ready ready();
+  // Storage reports entries up to index durable; the leader counts itself toward commit only then.
+  void persisted(Index index);
 
   [[nodiscard]] NodeId id() const noexcept { return config_.id; }
   [[nodiscard]] Role role() const noexcept { return role_; }
@@ -103,6 +105,7 @@ class Raft {
   std::vector<Index> matches_;
   Index commit_;
   Index applied_;
+  Index persisted_;
   std::uint64_t dropped_ = 0;
 };
 
