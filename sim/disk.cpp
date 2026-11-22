@@ -2,11 +2,30 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
+#include <optional>
 #include <span>
 
 #include "core/assert.hpp"
+#include "core/hash.hpp"
 
 namespace rme::sim {
+
+namespace {
+
+std::uint64_t checksum(const consensus::Entry& entry) {
+  Hasher hasher;
+  hasher.add(entry.term.value());
+  hasher.add(entry.index.value());
+  hasher.add(static_cast<std::uint64_t>(entry.type));
+  hasher.add(entry.data.size());
+  for (const std::byte byte : entry.data) {
+    hasher.add(static_cast<std::uint64_t>(byte));
+  }
+  return hasher.digest();
+}
+
+}  // namespace
 
 void Disk::save(const consensus::HardState& state) {
   written_.state = state;
@@ -25,9 +44,7 @@ void Disk::append(std::span<const consensus::Entry> entries) {
 void Disk::sync() {
   durable_.state = written_.state;
   const std::size_t from = dirty_from_.value_or(written_.entries.size());
-  durable_.entries.resize(from);
-  const auto fresh = std::span(written_.entries).subspan(from);
-  durable_.entries.insert(durable_.entries.end(), fresh.begin(), fresh.end());
+  persist(from, std::span(written_.entries).subspan(from));
   state_dirty_ = false;
   dirty_from_.reset();
 }
@@ -53,10 +70,33 @@ void Disk::tear() {
     --kept;
   }
   if (kept > 0) {
-    const auto fresh = std::span(written_.entries).subspan(from, kept);
-    durable_.entries.resize(from);
-    durable_.entries.insert(durable_.entries.end(), fresh.begin(), fresh.end());
+    persist(from, std::span(written_.entries).subspan(from, kept));
   }
+}
+
+void Disk::persist(std::size_t from, std::span<const consensus::Entry> fresh) {
+  durable_.entries.resize(from);
+  durable_.entries.insert(durable_.entries.end(), fresh.begin(), fresh.end());
+  sums_.resize(from);
+  sums_.reserve(durable_.entries.size());
+  for (const consensus::Entry& entry : fresh) {
+    sums_.push_back(checksum(entry));
+  }
+}
+
+void Disk::corrupt(consensus::Index index) {
+  RME_ASSERT(index > consensus::Index(0) && index.value() <= durable_.entries.size());
+  consensus::Entry& entry = durable_.entries[index.value() - 1];
+  entry.term = consensus::Term(entry.term.value() ^ 1U);
+}
+
+std::optional<consensus::Index> Disk::corrupted() const {
+  for (std::size_t i = 0; i < durable_.entries.size(); ++i) {
+    if (checksum(durable_.entries[i]) != sums_[i]) {
+      return consensus::Index(i + 1);
+    }
+  }
+  return std::nullopt;
 }
 
 }  // namespace rme::sim

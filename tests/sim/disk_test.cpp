@@ -128,6 +128,35 @@ TEST(DiskTest, TornCrashWithNothingUnsyncedKeepsEverything) {
   EXPECT_EQ(disk.entries(), batch(1, 3, 4));
 }
 
+TEST(DiskTest, CorruptionIsFlaggedAtTheEntryAndSurvivesCrash) {
+  Disk disk(1);
+  disk.append(batch(1, 5, 1));
+  disk.sync();
+  EXPECT_EQ(disk.corrupted(), std::nullopt);
+
+  disk.corrupt(Index(3));
+  EXPECT_NE(disk.entries()[2], batch(3, 1, 1)[0]);
+  EXPECT_EQ(disk.corrupted(), Index(3));
+  disk.crash(Crash::kClean);
+  EXPECT_EQ(disk.corrupted(), Index(3));
+}
+
+TEST(DiskTest, RewritingACorruptEntryClearsTheFlag) {
+  Disk disk(1);
+  disk.append(batch(1, 5, 1));
+  disk.sync();
+  disk.corrupt(Index(4));
+  disk.append(batch(4, 1, 2));
+  disk.sync();
+  EXPECT_EQ(disk.corrupted(), std::nullopt);
+}
+
+TEST(DiskDeathTest, CorruptingAnUnsyncedEntryAsserts) {
+  Disk disk(1);
+  disk.append(batch(1, 2, 1));
+  EXPECT_DEATH(disk.corrupt(Index(1)), "index.value\\(\\) <= durable_.entries.size\\(\\)");
+}
+
 TEST(DiskDeathTest, AppendWithAGapAsserts) {
   Disk disk(1);
   EXPECT_DEATH(disk.append(batch(2, 1, 1)), "from <= written_.entries.size()");

@@ -25,6 +25,10 @@ class Disk {
   void append(std::span<const consensus::Entry> entries);
   void sync();
   void crash(Crash mode);
+  // Flips a bit in a synced entry without updating its checksum.
+  void corrupt(consensus::Index index);
+  // The first synced entry whose checksum no longer matches.
+  [[nodiscard]] std::optional<consensus::Index> corrupted() const;
 
   [[nodiscard]] const consensus::HardState& state() const noexcept { return durable_.state; }
   [[nodiscard]] const std::vector<consensus::Entry>& entries() const noexcept {
@@ -39,10 +43,12 @@ class Disk {
   };
 
   void tear();
+  void persist(std::size_t from, std::span<const consensus::Entry> fresh);
 
   Rng rng_;
   Image written_;
   Image durable_;
+  std::vector<std::uint64_t> sums_;
   bool state_dirty_ = false;
   std::optional<std::size_t> dirty_from_;
 };
