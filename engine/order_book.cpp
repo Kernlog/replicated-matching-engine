@@ -20,6 +20,8 @@ std::optional<RejectReason> invalid(std::optional<Price> price, Qty qty) noexcep
 
 }  // namespace
 
+OrderBook::OrderBook(BookConfig config) : pool_(config.max_orders) {}
+
 void OrderBook::apply(const Command& command, std::vector<Event>& out) {
   std::visit([&](const auto& cmd) { on(cmd, out); }, command);
   RME_ASSERT(!crossed());
@@ -41,6 +43,9 @@ std::optional<RejectReason> OrderBook::reject_reason(OrderId id, std::optional<P
   if (index_.contains(id)) {
     return RejectReason::kDuplicateId;
   }
+  if (price && pool_.full()) {
+    return RejectReason::kBookFull;
+  }
   return std::nullopt;
 }
 
@@ -53,16 +58,18 @@ Qty OrderBook::match(Levels& levels, OrderId taker, Qty qty, Crosses crosses,
                      std::vector<Event>& out) {
   while (qty > Qty(0) && !levels.empty() && crosses(levels.begin()->first)) {
     auto level = levels.begin();
-    auto& queue = level->second;
+    Level& queue = level->second;
     while (qty > Qty(0) && !queue.empty()) {
-      auto& maker = queue.front();
+      const std::uint32_t head = queue.head;
+      RestingOrder& maker = pool_[head].order;
       const Qty traded = std::min(qty, maker.qty);
       out.emplace_back(Fill{taker, maker.id, maker.price, traded});
       qty -= traded;
       maker.qty -= traded;
       if (maker.qty == Qty(0)) {
+        queue.unlink(pool_, head);
         index_.erase(maker.id);
-        queue.pop_front();
+        pool_.release(head);
       }
     }
     if (queue.empty()) {
@@ -92,12 +99,12 @@ void OrderBook::on(const Replace& replace, std::vector<Event>& out) {
     return;
   }
   out.emplace_back(Replaced{replace.id, replace.price, replace.qty});
-  auto& [side, it] = found->second;
-  if (replace.price == it->price && replace.qty <= it->qty) {
-    it->qty = replace.qty;
+  OrderNode& node = pool_[found->second];
+  if (replace.price == node.order.price && replace.qty <= node.order.qty) {
+    node.order.qty = replace.qty;
     return;
   }
-  const Side order_side = side;
+  const Side order_side = node.side;
   remove(found);
   execute(LimitOrder{replace.id, order_side, replace.price, replace.qty}, out);
 }
@@ -139,31 +146,35 @@ void OrderBook::on(const Cancel& cancel, std::vector<Event>& out) {
 }
 
 template <typename Levels>
-void OrderBook::unlink(Levels& levels, Queue::iterator it) {
-  const auto level = levels.find(it->price);
+void OrderBook::unlink(Levels& levels, std::uint32_t index) {
+  const auto level = levels.find(pool_[index].order.price);
   RME_ASSERT(level != levels.end());
-  level->second.erase(it);
+  level->second.unlink(pool_, index);
   if (level->second.empty()) {
     levels.erase(level);
   }
 }
 
-RestingOrder OrderBook::remove(std::map<OrderId, Locator>::iterator found) {
-  const auto [side, it] = found->second;
-  const RestingOrder order = *it;
-  if (side == Side::kBuy) {
-    unlink(bids_, it);
+RestingOrder OrderBook::remove(Index::iterator found) {
+  const std::uint32_t index = found->second;
+  const OrderNode node = pool_[index];
+  if (node.side == Side::kBuy) {
+    unlink(bids_, index);
   } else {
-    unlink(asks_, it);
+    unlink(asks_, index);
   }
   index_.erase(found);
-  return order;
+  pool_.release(index);
+  return node.order;
 }
 
 void OrderBook::rest(Side side, const RestingOrder& order) {
-  auto& queue = side == Side::kBuy ? bids_[order.price] : asks_[order.price];
-  queue.push_back(order);
-  const bool inserted = index_.emplace(order.id, Locator{side, std::prev(queue.end())}).second;
+  const std::uint32_t index = pool_.acquire();
+  pool_[index].order = order;
+  pool_[index].side = side;
+  Level& level = side == Side::kBuy ? bids_[order.price] : asks_[order.price];
+  level.push_back(pool_, index);
+  const bool inserted = index_.emplace(order.id, index).second;
   RME_ASSERT(inserted);
 }
 
