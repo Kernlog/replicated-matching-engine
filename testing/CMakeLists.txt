@@ -1,0 +1,2 @@
+add_library(rme_testing INTERFACE)
+target_link_libraries(rme_testing INTERFACE rme_engine)

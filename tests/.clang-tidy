@@ -1,4 +1,5 @@
 InheritParentConfig: true
 Checks: >
+  -concurrency-mt-unsafe,
   -cppcoreguidelines-non-private-member-variables-in-classes,
   -readability-function-cognitive-complexity
