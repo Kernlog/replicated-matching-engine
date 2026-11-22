@@ -20,7 +20,7 @@ std::optional<RejectReason> invalid(std::optional<Price> price, Qty qty) noexcep
 
 }  // namespace
 
-OrderBook::OrderBook(BookConfig config) : pool_(config.max_orders) {}
+OrderBook::OrderBook(BookConfig config) : pool_(config.max_orders), index_(config.max_orders) {}
 
 void OrderBook::apply(const Command& command, std::vector<Event>& out) {
   std::visit([&](const auto& cmd) { on(cmd, out); }, command);
@@ -89,8 +89,8 @@ void OrderBook::on(const LimitOrder& order, std::vector<Event>& out) {
 }
 
 void OrderBook::on(const Replace& replace, std::vector<Event>& out) {
-  const auto found = index_.find(replace.id);
-  if (found == index_.end()) {
+  const std::uint32_t found = index_.find(replace.id);
+  if (found == kNil) {
     out.emplace_back(Rejected{replace.id, RejectReason::kUnknownOrder});
     return;
   }
@@ -99,7 +99,7 @@ void OrderBook::on(const Replace& replace, std::vector<Event>& out) {
     return;
   }
   out.emplace_back(Replaced{replace.id, replace.price, replace.qty});
-  OrderNode& node = pool_[found->second];
+  OrderNode& node = pool_[found];
   if (replace.price == node.order.price && replace.qty <= node.order.qty) {
     node.order.qty = replace.qty;
     return;
@@ -136,8 +136,8 @@ void OrderBook::on(const MarketOrder& order, std::vector<Event>& out) {
 }
 
 void OrderBook::on(const Cancel& cancel, std::vector<Event>& out) {
-  const auto found = index_.find(cancel.id);
-  if (found == index_.end()) {
+  const std::uint32_t found = index_.find(cancel.id);
+  if (found == kNil) {
     out.emplace_back(Rejected{cancel.id, RejectReason::kUnknownOrder});
     return;
   }
@@ -155,15 +155,14 @@ void OrderBook::unlink(Levels& levels, std::uint32_t index) {
   }
 }
 
-RestingOrder OrderBook::remove(Index::iterator found) {
-  const std::uint32_t index = found->second;
+RestingOrder OrderBook::remove(std::uint32_t index) {
   const OrderNode node = pool_[index];
   if (node.side == Side::kBuy) {
     unlink(bids_, index);
   } else {
     unlink(asks_, index);
   }
-  index_.erase(found);
+  index_.erase(node.order.id);
   pool_.release(index);
   return node.order;
 }
@@ -174,7 +173,7 @@ void OrderBook::rest(Side side, const RestingOrder& order) {
   pool_[index].side = side;
   Level& level = side == Side::kBuy ? bids_[order.price] : asks_[order.price];
   level.push_back(pool_, index);
-  const bool inserted = index_.emplace(order.id, index).second;
+  const bool inserted = index_.insert(order.id, index);
   RME_ASSERT(inserted);
 }
 

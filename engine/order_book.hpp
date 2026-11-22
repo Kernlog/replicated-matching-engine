@@ -10,6 +10,7 @@
 #include "core/types.hpp"
 #include "engine/command.hpp"
 #include "engine/event.hpp"
+#include "engine/order_index.hpp"
 #include "engine/order_pool.hpp"
 
 namespace rme::engine {
@@ -40,7 +41,6 @@ class OrderBook {
  private:
   using Bids = std::map<Price, Level, std::greater<>>;
   using Asks = std::map<Price, Level, std::less<>>;
-  using Index = std::map<OrderId, std::uint32_t>;
 
   template <typename Levels, typename F>
   void visit(const Levels& levels, F& fn) const {
@@ -57,7 +57,7 @@ class OrderBook {
   void on(const Replace& replace, std::vector<Event>& out);
   void execute(const LimitOrder& order, std::vector<Event>& out);
   void rest(Side side, const RestingOrder& order);
-  RestingOrder remove(Index::iterator found);
+  RestingOrder remove(std::uint32_t index);
   [[nodiscard]] bool crossed() const noexcept;
   [[nodiscard]] std::optional<RejectReason> reject_reason(OrderId id, std::optional<Price> price,
                                                           Qty qty) const;
@@ -71,7 +71,7 @@ class OrderBook {
   OrderPool pool_;
   Bids bids_;
   Asks asks_;
-  Index index_;
+  OrderIndex index_;
 };
 
 }  // namespace rme::engine
