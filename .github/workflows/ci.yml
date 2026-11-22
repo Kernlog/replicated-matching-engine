@@ -35,6 +35,26 @@ jobs:
       - run: cmake --preset release
       - run: cmake --build --preset release
       - run: ctest --preset release
+      - name: replay 10M commands
+        shell: bash
+        run: |
+          log="$RUNNER_TEMP/replay.log"
+          build/release/tools/gen_log 1 10000000 "$log"
+          { sha256sum "$log" | cut -d' ' -f1; build/release/tools/replay "$log"; } | tee replay-${{ matrix.compiler }}.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: replay-${{ matrix.compiler }}
+          path: replay-${{ matrix.compiler }}.txt
+
+  replay-gate:
+    needs: build-test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: replay-*
+          merge-multiple: true
+      - run: grep -q book_hash replay-clang.txt && diff replay-clang.txt replay-gcc.txt && cat replay-clang.txt
 
   asan:
     name: asan-ubsan
