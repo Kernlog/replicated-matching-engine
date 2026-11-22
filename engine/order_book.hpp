@@ -58,6 +58,8 @@ class OrderBook {
   void on(const LimitOrder& order, std::vector<Event>& out);
   void on(const MarketOrder& order, std::vector<Event>& out);
   void on(const Cancel& cancel, std::vector<Event>& out);
+  void on(const Replace& replace, std::vector<Event>& out);
+  void execute(const LimitOrder& order, std::vector<Event>& out);
   void rest(Side side, const RestingOrder& order);
   RestingOrder remove(std::map<OrderId, Locator>::iterator found);
 
