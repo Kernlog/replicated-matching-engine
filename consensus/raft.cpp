@@ -96,23 +96,34 @@ void Raft::check_quorum() {
   }
 }
 
-std::optional<Index> Raft::propose(std::vector<std::byte> data) {
+bool Raft::propose(std::span<const std::byte> command) {
   if (role_ != Role::kLeader) {
-    return std::nullopt;
+    return false;
   }
-  const Index index = log_.append(term_, EntryType::kCommand, std::move(data));
-  progress_of(config_.id).match = index;
+  if (!pending_.empty() && pending_.size() + command.size() > config_.max_entry_bytes) {
+    flush_proposals();
+  }
+  pending_.insert(pending_.end(), command.begin(), command.end());
+  return true;
+}
+
+void Raft::flush_proposals() {
+  if (pending_.empty()) {
+    return;
+  }
+  progress_of(config_.id).match =
+      log_.append(term_, EntryType::kCommand, std::exchange(pending_, {}));
   maybe_commit();
   broadcast_append();
-  return index;
 }
 
 bool Raft::has_ready() const noexcept {
   return hard_state() != saved_ || !log_.unstable().empty() || !outbox_.empty() ||
-         commit_ > applied_;
+         !pending_.empty() || commit_ > applied_;
 }
 
 Ready Raft::ready() {
+  flush_proposals();
   Ready ready;
   if (hard_state() != saved_) {
     saved_ = hard_state();
@@ -137,6 +148,7 @@ void Raft::become_follower(Term term, std::optional<NodeId> leader) {
   leader_ = leader;
   granted_.clear();
   progress_.clear();
+  pending_.clear();
   reset_election_timer();
 }
 
