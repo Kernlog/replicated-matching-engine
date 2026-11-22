@@ -19,6 +19,7 @@ Raft::Raft(RaftConfig config, HardState state, std::vector<Entry> log)
       saved_(state) {
   RME_ASSERT(std::ranges::find(config_.members, config_.id) != config_.members.end());
   RME_ASSERT(config_.election_ticks > config_.heartbeat_ticks && config_.heartbeat_ticks > 0);
+  persisted_ = log_.last_index();
   reset_election_timer();
 }
 
@@ -111,15 +112,21 @@ void Raft::flush_proposals() {
   if (pending_.empty()) {
     return;
   }
-  progress_of(config_.id).match =
-      log_.append(term_, EntryType::kCommand, std::exchange(pending_, {}));
-  maybe_commit();
+  log_.append(term_, EntryType::kCommand, std::exchange(pending_, {}));
   broadcast_append();
 }
 
 bool Raft::has_ready() const noexcept {
   return hard_state() != saved_ || !log_.unstable().empty() || !outbox_.empty() ||
          !pending_.empty() || commit_ > applied_;
+}
+
+void Raft::persisted(Index index) {
+  persisted_ = std::min(std::max(persisted_, index), log_.last_index());
+  if (role_ == Role::kLeader) {
+    progress_of(config_.id).match = persisted_;
+    maybe_commit();
+  }
 }
 
 Ready Raft::ready() {
@@ -196,11 +203,10 @@ void Raft::become_leader() {
   quorum_elapsed_ = 0;
   progress_.clear();
   for (const NodeId member : config_.members) {
-    const Index match = member == config_.id ? log_.last_index() : Index(0);
+    const Index match = member == config_.id ? persisted_ : Index(0);
     progress_.push_back(Progress{member, log_.last_index() + Index(1), match});
   }
-  progress_of(config_.id).match = log_.append(term_, EntryType::kNoop, {});
-  maybe_commit();
+  log_.append(term_, EntryType::kNoop, {});
   broadcast_append();
 }
 
@@ -358,6 +364,7 @@ void Raft::on(const Message& message, const AppendRequest& request) {
     return;
   }
   const Index last_new = log_.merge(request.prev_index, request.entries);
+  persisted_ = std::min(persisted_, log_.stable_index());
   commit_ = std::max(commit_, std::min(request.commit, last_new));
   send(message.from, AppendResponse{true, last_new, Index(0), Term(0)});
 }
