@@ -1,0 +1,74 @@
+#include <gtest/gtest.h>
+
+#include <span>
+#include <string>
+#include <variant>
+#include <vector>
+
+#include "consensus/node.hpp"
+#include "consensus/raft.hpp"
+#include "tests/consensus/cluster.hpp"
+
+namespace rme::consensus {
+namespace {
+
+struct Recorder {
+  std::vector<std::string> events;
+  std::vector<Message> sent;
+
+  void save(const HardState& /*state*/) { events.emplace_back("save"); }
+  void append(std::span<const Entry> /*entries*/) { events.emplace_back("append"); }
+  void sync() { events.emplace_back("sync"); }
+  void send(Message&& message) {
+    events.emplace_back(std::holds_alternative<VoteResponse>(message.body) ? "send vote" : "send");
+    sent.push_back(std::move(message));
+  }
+  void apply(const Entry& /*entry*/) { events.emplace_back("apply"); }
+};
+
+TEST(PersistTest, VoteIsSyncedBeforeTheGrantIsSent) {
+  Raft raft(RaftConfig{.id = NodeId(1), .members = {NodeId(1), NodeId(2), NodeId(3)}});
+  raft.step({NodeId(2), NodeId(1), Term(1), VoteRequest{}});
+  Recorder recorder;
+  process_ready(raft, recorder, recorder, recorder);
+  EXPECT_EQ(recorder.events, (std::vector<std::string>{"save", "sync", "send vote"}));
+}
+
+TEST(PersistTest, NothingIsSyncedWithoutDurableChanges) {
+  Raft raft(RaftConfig{.id = NodeId(1), .members = {NodeId(1), NodeId(2), NodeId(3)}},
+            HardState{Term(2), std::nullopt});
+  raft.step({NodeId(2), NodeId(1), Term(1), AppendRequest{}});
+  Recorder recorder;
+  process_ready(raft, recorder, recorder, recorder);
+  EXPECT_EQ(recorder.events, (std::vector<std::string>{"send"}));
+}
+
+TEST(PersistTest, VoteSurvivesRestart) {
+  Cluster cluster(3);
+  cluster.isolate(3);
+  cluster.campaign(1);
+  ASSERT_EQ(cluster.leader_id(), 1U);
+  const Term term = cluster.node(1).term();
+  EXPECT_EQ(cluster.storage(2).state(), (HardState{term, NodeId(1)}));
+
+  cluster.restart(2);
+  EXPECT_EQ(cluster.node(2).term(), term);
+  cluster.node(2).step({NodeId(3), NodeId(2), term, VoteRequest{}});
+  const Ready ready = cluster.node(2).ready();
+  ASSERT_EQ(ready.messages.size(), 1U);
+  EXPECT_FALSE(std::get<VoteResponse>(ready.messages[0].body).granted);
+}
+
+TEST(PersistTest, RestartedClusterElectsInAHigherTerm) {
+  Cluster cluster(3);
+  ASSERT_TRUE(cluster.run_until([&] { return cluster.leader_id() != 0; }));
+  const Term term = cluster.node(cluster.leader_id()).term();
+  for (std::uint32_t id = 1; id <= 3; ++id) {
+    cluster.restart(id);
+  }
+  ASSERT_TRUE(cluster.run_until([&] { return cluster.leader_id() != 0; }));
+  EXPECT_GT(cluster.node(cluster.leader_id()).term(), term);
+}
+
+}  // namespace
+}  // namespace rme::consensus
