@@ -122,6 +122,8 @@ void Raft::become_leader() {
     const Index match = member == config_.id ? log_.last_index() : Index(0);
     progress_.push_back(Progress{member, log_.last_index() + Index(1), match});
   }
+  progress_of(config_.id).match = log_.append(term_, EntryType::kNoop, {});
+  maybe_commit();
   broadcast_append();
 }
 
