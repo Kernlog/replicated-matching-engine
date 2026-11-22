@@ -8,6 +8,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 option(RME_WERROR "Treat warnings as errors" ON)
+option(RME_BUILD_BENCH "Build benchmarks" OFF)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
   set(RME_ARCH "x86-64-v3" CACHE STRING "Value passed to -march; empty to disable")
@@ -34,7 +35,14 @@ endif()
 add_subdirectory(core)
 add_subdirectory(engine)
 
-if(BUILD_TESTING)
+if(BUILD_TESTING OR RME_BUILD_BENCH)
   add_subdirectory(testing)
+endif()
+
+if(BUILD_TESTING)
   add_subdirectory(tests)
+endif()
+
+if(RME_BUILD_BENCH)
+  add_subdirectory(bench)
 endif()
