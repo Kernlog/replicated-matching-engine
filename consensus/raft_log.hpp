@@ -20,6 +20,8 @@ class RaftLog {
   [[nodiscard]] std::optional<Term> term_at(Index index) const noexcept;
   [[nodiscard]] bool matches(Index index, Term term) const noexcept;
   [[nodiscard]] const Entry& at(Index index) const noexcept;
+  [[nodiscard]] Index first_index_of_term_at(Index index) const noexcept;
+  [[nodiscard]] std::optional<Index> last_index_of(Term term) const noexcept;
 
   Index append(Term term, EntryType type, std::vector<std::byte> data);
   // Entries must follow prev_index contiguously; prev_index must already match.

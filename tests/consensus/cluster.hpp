@@ -6,6 +6,7 @@
 #include <initializer_list>
 #include <optional>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "consensus/node.hpp"
@@ -36,6 +37,25 @@ class Cluster {
     nodes_.at(id - 1) = Raft(configs_.at(id - 1), disk.state(), disk.entries());
   }
 
+  // Replaces a node's durable state with the given term and entry terms, then restarts it.
+  void load(std::uint32_t id, std::uint64_t term, std::initializer_list<std::uint64_t> log_terms) {
+    std::vector<Entry> entries;
+    for (const std::uint64_t entry_term : log_terms) {
+      entries.push_back(
+          Entry{Term(entry_term), Index(entries.size() + 1), EntryType::kCommand, {}});
+    }
+    MemoryStorage& disk = storage_.at(id - 1);
+    disk = MemoryStorage{};
+    disk.save(HardState{Term(term), std::nullopt});
+    if (!entries.empty()) {
+      disk.append(entries);
+    }
+    disk.sync();
+    restart(id);
+  }
+
+  [[nodiscard]] int rejections() const noexcept { return rejections_; }
+
   [[nodiscard]] const MemoryStorage& storage(std::uint32_t id) const { return storage_.at(id - 1); }
   [[nodiscard]] const std::vector<Entry>& applied(std::uint32_t id) const {
     return applied_.at(id - 1).entries;
@@ -61,6 +81,10 @@ class Cluster {
         return;
       }
       for (const Message& message : batch) {
+        if (const auto* response = std::get_if<AppendResponse>(&message.body);
+            response != nullptr && !response->success) {
+          ++rejections_;
+        }
         node(message.to.value()).step(message);
       }
     }
@@ -159,6 +183,7 @@ class Cluster {
   std::vector<Applied> applied_;
   std::vector<int> group_;
   unsigned next_payload_ = 0;
+  int rejections_ = 0;
 };
 
 }  // namespace rme::consensus
