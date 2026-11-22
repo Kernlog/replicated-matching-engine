@@ -1,0 +1,75 @@
+name: bench
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VCPKG_COMMIT: 93ad765c7b66ab9ce97469ec23a90b15c3a14ee5
+  VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+  VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-cache
+  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
+jobs:
+  bench:
+    runs-on: ubuntu-24.04
+    env:
+      CXX: clang++-18
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: clang-bench
+      - name: build base and head
+        run: |
+          git worktree add "$RUNNER_TEMP/base" "$BASE_SHA"
+          for src in "$RUNNER_TEMP/base" "$GITHUB_WORKSPACE"; do
+            (cd "$src" && cmake --preset bench && cmake --build --preset bench)
+          done
+      - name: run alternated
+        run: |
+          mkdir -p "$RUNNER_TEMP/out/base" "$RUNNER_TEMP/out/head"
+          for round in 1 2 3; do
+            for side in base head; do
+              src=$([ "$side" = base ] && echo "$RUNNER_TEMP/base" || echo "$GITHUB_WORKSPACE")
+              taskset -c 1 "$src/build/bench/bench/engine_bench" --benchmark_repetitions=3 \
+                --benchmark_format=json --benchmark_out="$RUNNER_TEMP/out/$side/$round.json" >/dev/null
+            done
+          done
+          for side in base head; do
+            src=$([ "$side" = base ] && echo "$RUNNER_TEMP/base" || echo "$GITHUB_WORKSPACE")
+            bin="$src/build/bench/tools/replay"
+            [ -f "$bin" ] || continue
+            text=$(size -B "$bin" | awk 'NR == 2 { print $1 }')
+            file=$(stat -c %s "$bin")
+            printf '{"replay text": %s, "replay file": %s}\n' "$text" "$file" > "$RUNNER_TEMP/out/$side/sizes.json"
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bench-results
+          path: ${{ runner.temp }}/out
+      - name: comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          python3 tools/bench_compare.py "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/out/base" "$RUNNER_TEMP/out/head" > comment.md
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+          id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            -q '.[] | select(.body | startswith("<!-- rme-bench -->")) | .id' | head -1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@comment.md >/dev/null
+          else
+            gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@comment.md >/dev/null
+          fi
