@@ -34,6 +34,7 @@ enum class RejectReason : std::uint8_t {
   kDuplicateId,
   kInvalidQty,
   kInvalidPrice,
+  kBookFull,
 };
 
 struct Rejected {
