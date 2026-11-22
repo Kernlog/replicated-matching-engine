@@ -25,6 +25,13 @@ Raft::Raft(RaftConfig config, HardState state, std::vector<Entry> log)
 void Raft::tick() {
   ++elapsed_;
   if (role_ == Role::kLeader) {
+    if (config_.check_quorum && ++quorum_elapsed_ >= config_.election_ticks) {
+      quorum_elapsed_ = 0;
+      check_quorum();
+      if (role_ != Role::kLeader) {
+        return;
+      }
+    }
     if (elapsed_ >= config_.heartbeat_ticks) {
       elapsed_ = 0;
       broadcast_append();
@@ -51,6 +58,10 @@ void Raft::step(const Message& message) {
   const bool pre_vote_request = vote_request != nullptr && vote_request->pre_vote;
   const bool pre_vote_grant =
       vote_response != nullptr && vote_response->pre_vote && vote_response->granted;
+  if (message.term > term_ && vote_request != nullptr && !pre_vote_request &&
+      config_.check_quorum && in_leader_lease()) {
+    return;
+  }
   if (message.term > term_) {
     if (!pre_vote_request && !pre_vote_grant) {
       const bool from_leader = std::holds_alternative<AppendRequest>(message.body);
@@ -64,7 +75,25 @@ void Raft::step(const Message& message) {
     }
     return;
   }
+  if (role_ == Role::kLeader) {
+    progress_of(message.from).recent_active = true;
+  }
   std::visit([&](const auto& body) { on(message, body); }, message.body);
+}
+
+// A leader that has not heard from a majority within an election timeout steps down, so a
+// partitioned leader stops accepting work it can never commit.
+void Raft::check_quorum() {
+  std::size_t active = 0;
+  for (Progress& peer : progress_) {
+    if (peer.id == config_.id || peer.recent_active) {
+      ++active;
+    }
+    peer.recent_active = false;
+  }
+  if (!is_quorum(active)) {
+    become_follower(term_, std::nullopt);
+  }
 }
 
 std::optional<Index> Raft::propose(std::vector<std::byte> data) {
@@ -152,6 +181,7 @@ void Raft::become_leader() {
   leader_ = config_.id;
   granted_.clear();
   elapsed_ = 0;
+  quorum_elapsed_ = 0;
   progress_.clear();
   for (const NodeId member : config_.members) {
     const Index match = member == config_.id ? log_.last_index() : Index(0);

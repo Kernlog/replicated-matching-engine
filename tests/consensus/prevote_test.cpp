@@ -51,7 +51,7 @@ TEST(PreVoteTest, RejoiningNodeDoesNotDeposeLeader) {
 }
 
 TEST(PreVoteTest, WithoutPreVoteRejoiningNodeForcesAnElection) {
-  Cluster cluster(3, 1, 64, false);
+  Cluster cluster(3, {.pre_vote = false});
   const std::uint32_t leader = elect(cluster);
   const Term term = cluster.node(leader).term();
   const std::uint32_t lonely = follower_of(leader);

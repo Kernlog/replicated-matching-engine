@@ -19,6 +19,7 @@ struct RaftConfig {
   std::uint64_t seed = 1;
   std::size_t max_entries_per_append = 64;
   bool pre_vote = true;
+  bool check_quorum = true;
 };
 
 enum class Role : std::uint8_t { kFollower, kPreCandidate, kCandidate, kLeader };
@@ -52,8 +53,10 @@ class Raft {
     NodeId id;
     Index next;
     Index match;
+    bool recent_active = false;
   };
 
+  void check_quorum();
   void broadcast_append();
   void send_append(const Progress& peer);
   Progress& progress_of(NodeId id);
@@ -80,6 +83,7 @@ class Raft {
   HardState saved_;
   std::uint32_t elapsed_ = 0;
   std::uint32_t timeout_ = 0;
+  std::uint32_t quorum_elapsed_ = 0;
   std::vector<NodeId> granted_;
   std::vector<Message> outbox_;
   std::vector<Progress> progress_;
