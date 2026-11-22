@@ -32,7 +32,8 @@ Body only_reply(Raft& raft) {
 
 Message vote_request(std::uint32_t from, std::uint64_t term, std::uint64_t last_index,
                      std::uint64_t last_term) {
-  return {NodeId(from), NodeId(1), Term(term), VoteRequest{Index(last_index), Term(last_term)}};
+  return {NodeId(from), NodeId(1), Term(term),
+          VoteRequest{Index(last_index), Term(last_term), false}};
 }
 
 TEST(ElectionTest, SingleNodeElectsItself) {
@@ -66,7 +67,7 @@ TEST(ElectionTest, HeartbeatsKeepLeaderInPlace) {
 }
 
 TEST(ElectionTest, SplitVoteIsResolvedInALaterTerm) {
-  Cluster cluster(4);
+  Cluster cluster(4, 1, 64, false);
   cluster.partition({{1, 3}, {2, 4}});
   cluster.campaign(1);
   cluster.campaign(2);

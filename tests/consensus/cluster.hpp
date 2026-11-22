@@ -17,7 +17,8 @@ namespace rme::consensus {
 
 class Cluster {
  public:
-  explicit Cluster(std::uint32_t size, std::uint64_t seed = 1, std::size_t max_entries = 64)
+  explicit Cluster(std::uint32_t size, std::uint64_t seed = 1, std::size_t max_entries = 64,
+                   bool pre_vote = true)
       : storage_(size), applied_(size), group_(size, 0) {
     for (std::uint32_t i = 1; i <= size; ++i) {
       members_.emplace_back(i);
@@ -26,7 +27,8 @@ class Cluster {
       configs_.push_back(RaftConfig{.id = id,
                                     .members = members_,
                                     .seed = seed * 1000 + id.value(),
-                                    .max_entries_per_append = max_entries});
+                                    .max_entries_per_append = max_entries,
+                                    .pre_vote = pre_vote});
       nodes_.emplace_back(configs_.back());
     }
   }
