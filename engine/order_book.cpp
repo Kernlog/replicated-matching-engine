@@ -6,6 +6,20 @@
 
 namespace rme::engine {
 
+namespace {
+
+std::optional<RejectReason> invalid(std::optional<Price> price, Qty qty) noexcept {
+  if (qty <= Qty(0)) {
+    return RejectReason::kInvalidQty;
+  }
+  if (price && *price <= Price(0)) {
+    return RejectReason::kInvalidPrice;
+  }
+  return std::nullopt;
+}
+
+}  // namespace
+
 void OrderBook::apply(const Command& command, std::vector<Event>& out) {
   std::visit([&](const auto& cmd) { on(cmd, out); }, command);
   RME_ASSERT(!crossed());
@@ -17,6 +31,17 @@ std::optional<Price> OrderBook::best_bid() const noexcept {
 
 std::optional<Price> OrderBook::best_ask() const noexcept {
   return asks_.empty() ? std::nullopt : std::optional(asks_.begin()->first);
+}
+
+std::optional<RejectReason> OrderBook::reject_reason(OrderId id, std::optional<Price> price,
+                                                     Qty qty) const {
+  if (const auto reason = invalid(price, qty)) {
+    return reason;
+  }
+  if (index_.contains(id)) {
+    return RejectReason::kDuplicateId;
+  }
+  return std::nullopt;
 }
 
 bool OrderBook::crossed() const noexcept {
@@ -48,6 +73,10 @@ Qty OrderBook::match(Levels& levels, OrderId taker, Qty qty, Crosses crosses,
 }
 
 void OrderBook::on(const LimitOrder& order, std::vector<Event>& out) {
+  if (const auto reason = reject_reason(order.id, order.price, order.qty)) {
+    out.emplace_back(Rejected{order.id, *reason});
+    return;
+  }
   out.emplace_back(Accepted{order.id});
   execute(order, out);
 }
@@ -56,6 +85,10 @@ void OrderBook::on(const Replace& replace, std::vector<Event>& out) {
   const auto found = index_.find(replace.id);
   if (found == index_.end()) {
     out.emplace_back(Rejected{replace.id, RejectReason::kUnknownOrder});
+    return;
+  }
+  if (const auto reason = invalid(replace.price, replace.qty)) {
+    out.emplace_back(Rejected{replace.id, *reason});
     return;
   }
   out.emplace_back(Replaced{replace.id, replace.price, replace.qty});
@@ -81,6 +114,10 @@ void OrderBook::execute(const LimitOrder& order, std::vector<Event>& out) {
 }
 
 void OrderBook::on(const MarketOrder& order, std::vector<Event>& out) {
+  if (const auto reason = reject_reason(order.id, std::nullopt, order.qty)) {
+    out.emplace_back(Rejected{order.id, *reason});
+    return;
+  }
   out.emplace_back(Accepted{order.id});
   const auto any_price = [](Price) { return true; };
   const Qty remaining = order.side == Side::kBuy
