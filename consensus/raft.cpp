@@ -180,7 +180,14 @@ void Raft::on(const Message& message, const AppendRequest& request) {
   RME_ASSERT(role_ != Role::kLeader);
   become_follower(term_, message.from);
   if (!log_.matches(request.prev_index, request.prev_term)) {
-    send(message.from, AppendResponse{});
+    AppendResponse reject;
+    if (request.prev_index > log_.last_index()) {
+      reject.conflict_index = log_.last_index() + Index(1);
+    } else {
+      reject.conflict_term = log_.at(request.prev_index).term;
+      reject.conflict_index = log_.first_index_of_term_at(request.prev_index);
+    }
+    send(message.from, reject);
     return;
   }
   const Index last_new = log_.merge(request.prev_index, request.entries);
@@ -200,9 +207,13 @@ void Raft::on(const Message& message, const AppendResponse& response) {
     }
     return;
   }
-  if (peer.next > peer.match + Index(1)) {
-    peer.next -= Index(1);
+  Index hinted = response.conflict_index;
+  if (response.conflict_term != Term(0)) {
+    if (const auto last = log_.last_index_of(response.conflict_term)) {
+      hinted = *last + Index(1);
+    }
   }
+  peer.next = std::max(peer.match + Index(1), std::min(hinted, peer.next - Index(1)));
   send_append(peer);
 }
 
