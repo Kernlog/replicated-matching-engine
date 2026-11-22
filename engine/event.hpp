@@ -39,7 +39,7 @@ enum class RejectReason : std::uint8_t {
 
 struct Rejected {
   OrderId id;
-  RejectReason reason;
+  RejectReason reason = RejectReason::kUnknownOrder;
 
   friend bool operator==(const Rejected&, const Rejected&) = default;
 };

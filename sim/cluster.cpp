@@ -30,7 +30,7 @@ void Cluster::Wire::send(consensus::Message&& message) const {
 void Cluster::Applier::apply(const consensus::Entry& entry) const {
   if (!disk->crashed()) {
     machine->apply(entry);
-    checker->on_applied(node, entry, machine->book_hash());
+    checker->on_applied(node, entry, machine->state_hash());
   }
 }
 

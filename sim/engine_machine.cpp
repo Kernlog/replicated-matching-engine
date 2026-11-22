@@ -39,4 +39,13 @@ std::uint64_t EngineMachine::book_hash() const {
   return engine::book_hash(book_);
 }
 
+std::uint64_t EngineMachine::state_hash() const {
+  Hasher hasher;
+  hasher.add(events_.digest());
+  if (applied_.value() % 64 == 0) {
+    hasher.add(book_hash());
+  }
+  return hasher.digest();
+}
+
 }  // namespace rme::sim

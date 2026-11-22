@@ -19,6 +19,8 @@ class EngineMachine {
 
   [[nodiscard]] consensus::Index applied() const noexcept { return applied_; }
   [[nodiscard]] std::uint64_t book_hash() const;
+  // Rolling hash of every engine output event, folded with the full book_hash every 64th index.
+  [[nodiscard]] std::uint64_t state_hash() const;
   [[nodiscard]] std::uint64_t events_hash() const noexcept { return events_.digest(); }
   [[nodiscard]] std::uint64_t commands() const noexcept { return commands_; }
 
