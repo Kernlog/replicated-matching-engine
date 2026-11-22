@@ -17,6 +17,7 @@ struct RaftConfig {
   std::uint32_t election_ticks = 10;
   std::uint32_t heartbeat_ticks = 1;
   std::uint64_t seed = 1;
+  std::size_t max_entries_per_append = 64;
 };
 
 enum class Role : std::uint8_t { kFollower, kCandidate, kLeader };
@@ -27,6 +28,8 @@ class Raft {
 
   void tick();
   void step(const Message& message);
+  // Appends to the leader's log; nullopt when this node is not the leader.
+  std::optional<Index> propose(std::vector<std::byte> data);
 
   [[nodiscard]] bool has_ready() const noexcept;
   Ready ready();
@@ -36,12 +39,23 @@ class Raft {
   [[nodiscard]] Term term() const noexcept { return term_; }
   [[nodiscard]] std::optional<NodeId> leader() const noexcept { return leader_; }
   [[nodiscard]] const RaftLog& log() const noexcept { return log_; }
+  [[nodiscard]] Index commit() const noexcept { return commit_; }
+  [[nodiscard]] std::uint64_t dropped() const noexcept { return dropped_; }
 
  private:
   void become_follower(Term term, std::optional<NodeId> leader);
   void campaign();
   void become_leader();
-  void broadcast_heartbeat();
+  struct Progress {
+    NodeId id;
+    Index next;
+    Index match;
+  };
+
+  void broadcast_append();
+  void send_append(const Progress& peer);
+  Progress& progress_of(NodeId id);
+  void maybe_commit();
   void reset_election_timer();
   void send(NodeId to, Body body);
   [[nodiscard]] bool is_quorum(std::size_t count) const noexcept;
@@ -64,6 +78,11 @@ class Raft {
   std::uint32_t timeout_ = 0;
   std::vector<NodeId> granted_;
   std::vector<Message> outbox_;
+  std::vector<Progress> progress_;
+  std::vector<Index> matches_;
+  Index commit_;
+  Index applied_;
+  std::uint64_t dropped_ = 0;
 };
 
 }  // namespace rme::consensus

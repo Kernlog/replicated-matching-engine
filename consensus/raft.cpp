@@ -1,6 +1,8 @@
 #include "consensus/raft.hpp"
 
 #include <algorithm>
+#include <cstddef>
+#include <functional>
 #include <utility>
 #include <variant>
 
@@ -25,7 +27,7 @@ void Raft::tick() {
   if (role_ == Role::kLeader) {
     if (elapsed_ >= config_.heartbeat_ticks) {
       elapsed_ = 0;
-      broadcast_heartbeat();
+      broadcast_append();
     }
     return;
   }
@@ -35,7 +37,11 @@ void Raft::tick() {
 }
 
 void Raft::step(const Message& message) {
-  RME_ASSERT(message.to == config_.id);
+  if (message.to != config_.id || message.from == config_.id ||
+      std::ranges::find(config_.members, message.from) == config_.members.end()) {
+    ++dropped_;
+    return;
+  }
   if (message.term > term_) {
     const bool from_leader = std::holds_alternative<AppendRequest>(message.body);
     become_follower(message.term, from_leader ? std::optional(message.from) : std::nullopt);
@@ -48,8 +54,20 @@ void Raft::step(const Message& message) {
   std::visit([&](const auto& body) { on(message, body); }, message.body);
 }
 
+std::optional<Index> Raft::propose(std::vector<std::byte> data) {
+  if (role_ != Role::kLeader) {
+    return std::nullopt;
+  }
+  const Index index = log_.append(term_, EntryType::kCommand, std::move(data));
+  progress_of(config_.id).match = index;
+  maybe_commit();
+  broadcast_append();
+  return index;
+}
+
 bool Raft::has_ready() const noexcept {
-  return hard_state() != saved_ || !log_.unstable().empty() || !outbox_.empty();
+  return hard_state() != saved_ || !log_.unstable().empty() || !outbox_.empty() ||
+         commit_ > applied_;
 }
 
 Ready Raft::ready() {
@@ -62,6 +80,9 @@ Ready Raft::ready() {
   ready.entries.assign(unstable.begin(), unstable.end());
   log_.mark_stable(log_.last_index());
   ready.messages = std::exchange(outbox_, {});
+  const auto committed = log_.slice(applied_ + Index(1), (commit_ - applied_).value());
+  ready.committed.assign(committed.begin(), committed.end());
+  applied_ = commit_;
   return ready;
 }
 
@@ -73,6 +94,7 @@ void Raft::become_follower(Term term, std::optional<NodeId> leader) {
   role_ = Role::kFollower;
   leader_ = leader;
   granted_.clear();
+  progress_.clear();
   reset_election_timer();
 }
 
@@ -99,15 +121,49 @@ void Raft::become_leader() {
   leader_ = config_.id;
   granted_.clear();
   elapsed_ = 0;
-  broadcast_heartbeat();
+  progress_.clear();
+  for (const NodeId member : config_.members) {
+    const Index match = member == config_.id ? log_.last_index() : Index(0);
+    progress_.push_back(Progress{member, log_.last_index() + Index(1), match});
+  }
+  progress_of(config_.id).match = log_.append(term_, EntryType::kNoop, {});
+  maybe_commit();
+  broadcast_append();
 }
 
-void Raft::broadcast_heartbeat() {
-  for (const NodeId peer : config_.members) {
-    if (peer != config_.id) {
-      send(peer, AppendRequest{log_.last_index(), log_.last_term(), {}, Index(0)});
+void Raft::broadcast_append() {
+  for (const Progress& peer : progress_) {
+    if (peer.id != config_.id) {
+      send_append(peer);
     }
   }
+}
+
+void Raft::send_append(const Progress& peer) {
+  const Index prev = peer.next - Index(1);
+  const auto entries = log_.slice(peer.next, config_.max_entries_per_append);
+  send(peer.id, AppendRequest{prev, log_.term_at(prev).value_or(Term(0)),
+                              std::vector<Entry>(entries.begin(), entries.end()), commit_});
+}
+
+// Only an entry from the current term is committed by counting replicas (paper section 5.4.2);
+// earlier entries commit with it.
+void Raft::maybe_commit() {
+  matches_.clear();
+  for (const Progress& peer : progress_) {
+    matches_.push_back(peer.match);
+  }
+  const auto median = matches_.begin() + static_cast<std::ptrdiff_t>(matches_.size() / 2);
+  std::ranges::nth_element(matches_, median, std::greater{});
+  if (*median > commit_ && log_.term_at(*median) == term_) {
+    commit_ = *median;
+  }
+}
+
+Raft::Progress& Raft::progress_of(NodeId id) {
+  const auto found = std::ranges::find(progress_, id, &Progress::id);
+  RME_ASSERT(found != progress_.end());
+  return *found;
 }
 
 void Raft::reset_election_timer() {
@@ -147,11 +203,47 @@ void Raft::on(const Message& message, const VoteResponse& response) {
   }
 }
 
-void Raft::on(const Message& message, const AppendRequest& /*request*/) {
+void Raft::on(const Message& message, const AppendRequest& request) {
   RME_ASSERT(role_ != Role::kLeader);
   become_follower(term_, message.from);
+  if (!log_.matches(request.prev_index, request.prev_term)) {
+    AppendResponse reject;
+    if (request.prev_index > log_.last_index()) {
+      reject.conflict_index = log_.last_index() + Index(1);
+    } else {
+      reject.conflict_term = log_.at(request.prev_index).term;
+      reject.conflict_index = log_.first_index_of_term_at(request.prev_index);
+    }
+    send(message.from, reject);
+    return;
+  }
+  const Index last_new = log_.merge(request.prev_index, request.entries);
+  commit_ = std::max(commit_, std::min(request.commit, last_new));
+  send(message.from, AppendResponse{true, last_new, Index(0), Term(0)});
 }
 
-void Raft::on(const Message& /*message*/, const AppendResponse& /*response*/) {}
+void Raft::on(const Message& message, const AppendResponse& response) {
+  if (role_ != Role::kLeader) {
+    return;
+  }
+  Progress& peer = progress_of(message.from);
+  if (response.success) {
+    peer.match = std::max(peer.match, response.match);
+    peer.next = std::max(peer.next, peer.match + Index(1));
+    maybe_commit();
+    if (peer.next <= log_.last_index()) {
+      send_append(peer);
+    }
+    return;
+  }
+  Index hinted = response.conflict_index;
+  if (response.conflict_term != Term(0)) {
+    if (const auto last = log_.last_index_of(response.conflict_term)) {
+      hinted = *last + Index(1);
+    }
+  }
+  peer.next = std::max(peer.match + Index(1), std::min(hinted, peer.next - Index(1)));
+  send_append(peer);
+}
 
 }  // namespace rme::consensus

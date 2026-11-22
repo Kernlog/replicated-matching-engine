@@ -37,6 +37,26 @@ const Entry& RaftLog::at(Index index) const noexcept {
   return entries_[index.value() - 1];
 }
 
+Index RaftLog::first_index_of_term_at(Index index) const noexcept {
+  const Term term = at(index).term;
+  while (index > Index(1) && at(index - Index(1)).term == term) {
+    index -= Index(1);
+  }
+  return index;
+}
+
+std::optional<Index> RaftLog::last_index_of(Term term) const noexcept {
+  for (Index index = last_index(); index > Index(0); index -= Index(1)) {
+    if (at(index).term == term) {
+      return index;
+    }
+    if (at(index).term < term) {
+      break;
+    }
+  }
+  return std::nullopt;
+}
+
 Index RaftLog::append(Term term, EntryType type, std::vector<std::byte> data) {
   RME_ASSERT(term >= last_term());
   const Index index = last_index() + Index(1);
