@@ -39,6 +39,9 @@ struct SimConfig {
   std::uint32_t nodes = 3;
   Time tick_interval = Time(10);
   Time duration = Time(100'000);
+  // After duration every fault stops and down nodes restart; every node must then apply an entry
+  // past anything that existed before the heal within this window.
+  Time heal_window = Time(20'000);
   NetworkConfig network;
   FaultConfig faults;
   WorkloadConfig workload;
@@ -51,6 +54,7 @@ struct SimStats {
   std::uint64_t applied = 0;
   std::uint64_t crashes = 0;
   std::uint64_t sync_crashes = 0;
+  Time recovered_after = Time(0);
   NetworkStats network;
   std::vector<std::string> violations;
 };
@@ -91,6 +95,9 @@ class Cluster {
   void process(std::size_t i);
   void observe(std::size_t i);
   void check_logs();
+  void heal();
+  [[nodiscard]] bool recovered() const;
+  bool step_until(Time end, bool stop_on_recovery);
   void crash(std::size_t i, Crash mode);
   void restart(std::size_t i);
   [[nodiscard]] bool roll(std::uint32_t one_in);
@@ -110,6 +117,8 @@ class Cluster {
   std::vector<consensus::Role> roles_;
   Checker checker_;
   std::uint64_t events_ = 0;
+  bool healed_ = false;
+  consensus::Index heal_mark_;
   Hasher trace_;
   SimStats stats_;
 };

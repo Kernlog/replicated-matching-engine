@@ -26,6 +26,15 @@ Network::Network(EventQueue& queue, NetworkConfig config, std::vector<consensus:
   }
 }
 
+void Network::heal() {
+  config_.drop = 0;
+  config_.delay = 0;
+  config_.duplicate = 0;
+  config_.reorder = 0;
+  config_.partitions = false;
+  isolated_.clear();
+}
+
 void Network::send(consensus::Message message) {
   ++stats_.sent;
   update_partition();

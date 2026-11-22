@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 namespace rme::sim {
 namespace {
@@ -12,6 +13,7 @@ TEST(ClusterTest, FaultFreeReplicasConvergeOnTheSameBook) {
   SimConfig config;
   config.duration = Time(20'000);
   config.workload.stop_at = Time(18'000);
+  config.heal_window = Time(0);
   config.faults.crash_one_in = 0;
   Cluster cluster(config);
   const SimStats stats = cluster.run();
@@ -48,6 +50,34 @@ TEST(ClusterTest, FiveNodesRun) {
   config.duration = Time(20'000);
   const SimStats stats = Cluster(config).run();
   EXPECT_GT(stats.applied, 1000U);
+}
+
+TEST(ClusterTest, RecoversAfterHealFromHeavyFaults) {
+  SimConfig config;
+  config.seed = 11;
+  config.duration = Time(30'000);
+  config.network.drop = 300;
+  config.network.partitions = true;
+  config.network.min_partition_gap = Time(500);
+  config.network.max_partition_gap = Time(1000);
+  config.network.min_partition = Time(2000);
+  config.network.max_partition = Time(4000);
+  config.faults.crash_one_in = 300;
+  config.faults.sync_crash_one_in = 300;
+  const SimStats stats = Cluster(config).run();
+  EXPECT_TRUE(stats.violations.empty()) << stats.violations.front();
+  EXPECT_GT(stats.recovered_after, Time(0));
+  EXPECT_LT(stats.recovered_after, Time(5'000));
+}
+
+TEST(ClusterTest, ReportsLivenessFailureWhenTheWindowIsTooShort) {
+  SimConfig config;
+  config.duration = Time(5'000);
+  config.heal_window = Time(1);
+  config.workload.stop_at = Time(0);
+  const SimStats stats = Cluster(config).run();
+  ASSERT_FALSE(stats.violations.empty());
+  EXPECT_NE(stats.violations.front().find("liveness"), std::string::npos);
 }
 
 }  // namespace

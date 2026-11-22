@@ -50,6 +50,7 @@ TEST(SwarmTest, SwarmSeedsKeepEverySafetyInvariant) {
     const SimStats stats = Cluster(config).run();
     EXPECT_TRUE(stats.violations.empty())
         << "seed " << seed << " (" << describe(config) << "): " << stats.violations.front();
+    EXPECT_GT(stats.recovered_after, Time(0)) << "seed " << seed;
   }
 }
 
