@@ -113,7 +113,8 @@ class Cluster {
       }
       node(message.to.value()).step(message);
     }
-    return !batch.empty();
+    return !batch.empty() ||
+           std::ranges::any_of(nodes_, [](const Raft& raft) { return raft.has_ready(); });
   }
 
   void start_campaign(std::uint32_t id) {

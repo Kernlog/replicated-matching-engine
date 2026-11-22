@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <span>
 #include <string>
 #include <variant>
@@ -12,6 +15,16 @@
 namespace rme::consensus {
 namespace {
 
+std::string label(const Message& message) {
+  if (std::holds_alternative<VoteResponse>(message.body)) {
+    return "send vote";
+  }
+  if (std::holds_alternative<AppendRequest>(message.body)) {
+    return "send append";
+  }
+  return "send";
+}
+
 struct Recorder {
   std::vector<std::string> events;
   std::vector<Message> sent;
@@ -20,7 +33,7 @@ struct Recorder {
   void append(std::span<const Entry> /*entries*/) { events.emplace_back("append"); }
   void sync() { events.emplace_back("sync"); }
   void send(Message&& message) {
-    events.emplace_back(std::holds_alternative<VoteResponse>(message.body) ? "send vote" : "send");
+    events.emplace_back(label(message));
     sent.push_back(std::move(message));
   }
   void apply(const Entry& /*entry*/) { events.emplace_back("apply"); }
@@ -68,6 +81,61 @@ TEST(PersistTest, RestartedClusterElectsInAHigherTerm) {
   }
   ASSERT_TRUE(cluster.run_until([&] { return cluster.leader_id() != 0; }));
   EXPECT_GT(cluster.node(cluster.leader_id()).term(), term);
+}
+
+Raft leader_of_three() {
+  Raft raft(
+      RaftConfig{.id = NodeId(1), .members = {NodeId(1), NodeId(2), NodeId(3)}, .pre_vote = false});
+  while (raft.role() != Role::kCandidate) {
+    raft.tick();
+  }
+  raft.step({NodeId(2), NodeId(1), raft.term(), VoteResponse{true, false}});
+  EXPECT_EQ(raft.role(), Role::kLeader);
+  Recorder ignore;
+  process_ready(raft, ignore, ignore, ignore);
+  const Index noop = raft.log().last_index();
+  for (const std::uint32_t follower : {2U, 3U}) {
+    raft.step(
+        {NodeId(follower), NodeId(1), raft.term(), AppendResponse{true, noop, Index(0), Term(0)}});
+  }
+  EXPECT_EQ(raft.commit(), noop);
+  process_ready(raft, ignore, ignore, ignore);
+  return raft;
+}
+
+TEST(SelfAckTest, LeaderSendsAppendsBeforeItsOwnSync) {
+  Raft raft = leader_of_three();
+  const std::array command{std::byte{1}};
+  ASSERT_TRUE(raft.propose(command));
+  Recorder recorder;
+  process_ready(raft, recorder, recorder, recorder);
+  EXPECT_EQ(recorder.events,
+            (std::vector<std::string>{"send append", "send append", "append", "sync"}));
+}
+
+TEST(SelfAckTest, LeaderCountsItselfOnlyAfterPersist) {
+  Raft raft = leader_of_three();
+  const Index committed = raft.commit();
+  const std::array command{std::byte{1}};
+  ASSERT_TRUE(raft.propose(command));
+  const Ready ready = raft.ready();
+  const Index index = ready.entries.back().index;
+  raft.step({NodeId(2), NodeId(1), raft.term(), AppendResponse{true, index, Index(0), Term(0)}});
+  EXPECT_EQ(raft.commit(), committed);
+  raft.persisted(index);
+  EXPECT_EQ(raft.commit(), index);
+}
+
+TEST(SelfAckTest, FollowersAloneFormAMajorityBeforeLeaderFsync) {
+  Raft raft = leader_of_three();
+  const std::array command{std::byte{1}};
+  ASSERT_TRUE(raft.propose(command));
+  const Index index = raft.ready().entries.back().index;
+  for (const std::uint32_t follower : {2U, 3U}) {
+    raft.step(
+        {NodeId(follower), NodeId(1), raft.term(), AppendResponse{true, index, Index(0), Term(0)}});
+  }
+  EXPECT_EQ(raft.commit(), index);
 }
 
 }  // namespace
