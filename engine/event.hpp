@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <variant>
 
 #include "core/types.hpp"
@@ -28,6 +29,15 @@ struct Cancelled {
   friend bool operator==(const Cancelled&, const Cancelled&) = default;
 };
 
-using Event = std::variant<Accepted, Fill, Cancelled>;
+enum class RejectReason : std::uint8_t { kUnknownOrder };
+
+struct Rejected {
+  OrderId id;
+  RejectReason reason;
+
+  friend bool operator==(const Rejected&, const Rejected&) = default;
+};
+
+using Event = std::variant<Accepted, Fill, Cancelled, Rejected>;
 
 }  // namespace rme::engine
