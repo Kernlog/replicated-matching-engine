@@ -1,6 +1,8 @@
 #include "consensus/raft.hpp"
 
 #include <algorithm>
+#include <cstddef>
+#include <functional>
 #include <utility>
 #include <variant>
 
@@ -54,12 +56,14 @@ std::optional<Index> Raft::propose(std::vector<std::byte> data) {
   }
   const Index index = log_.append(term_, EntryType::kCommand, std::move(data));
   progress_of(config_.id).match = index;
+  maybe_commit();
   broadcast_append();
   return index;
 }
 
 bool Raft::has_ready() const noexcept {
-  return hard_state() != saved_ || !log_.unstable().empty() || !outbox_.empty();
+  return hard_state() != saved_ || !log_.unstable().empty() || !outbox_.empty() ||
+         commit_ > applied_;
 }
 
 Ready Raft::ready() {
@@ -72,6 +76,9 @@ Ready Raft::ready() {
   ready.entries.assign(unstable.begin(), unstable.end());
   log_.mark_stable(log_.last_index());
   ready.messages = std::exchange(outbox_, {});
+  const auto committed = log_.slice(applied_ + Index(1), (commit_ - applied_).value());
+  ready.committed.assign(committed.begin(), committed.end());
+  applied_ = commit_;
   return ready;
 }
 
@@ -130,7 +137,21 @@ void Raft::send_append(const Progress& peer) {
   const Index prev = peer.next - Index(1);
   const auto entries = log_.slice(peer.next, config_.max_entries_per_append);
   send(peer.id, AppendRequest{prev, log_.term_at(prev).value_or(Term(0)),
-                              std::vector<Entry>(entries.begin(), entries.end()), Index(0)});
+                              std::vector<Entry>(entries.begin(), entries.end()), commit_});
+}
+
+// Only an entry from the current term is committed by counting replicas (paper section 5.4.2);
+// earlier entries commit with it.
+void Raft::maybe_commit() {
+  matches_.clear();
+  for (const Progress& peer : progress_) {
+    matches_.push_back(peer.match);
+  }
+  const auto median = matches_.begin() + static_cast<std::ptrdiff_t>(matches_.size() / 2);
+  std::ranges::nth_element(matches_, median, std::greater{});
+  if (*median > commit_ && log_.term_at(*median) == term_) {
+    commit_ = *median;
+  }
 }
 
 Raft::Progress& Raft::progress_of(NodeId id) {
@@ -191,6 +212,7 @@ void Raft::on(const Message& message, const AppendRequest& request) {
     return;
   }
   const Index last_new = log_.merge(request.prev_index, request.entries);
+  commit_ = std::max(commit_, std::min(request.commit, last_new));
   send(message.from, AppendResponse{true, last_new, Index(0), Term(0)});
 }
 
@@ -202,6 +224,7 @@ void Raft::on(const Message& message, const AppendResponse& response) {
   if (response.success) {
     peer.match = std::max(peer.match, response.match);
     peer.next = std::max(peer.next, peer.match + Index(1));
+    maybe_commit();
     if (peer.next <= log_.last_index()) {
       send_append(peer);
     }
