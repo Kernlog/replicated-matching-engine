@@ -44,7 +44,7 @@ TEST(ElectionTest, SingleNodeElectsItself) {
 
 TEST(ElectionTest, ThreeNodesAgreeOnOneLeader) {
   for (std::uint64_t seed = 1; seed <= 20; ++seed) {
-    Cluster cluster(3, seed);
+    Cluster cluster(3, {.seed = seed});
     ASSERT_TRUE(cluster.run_until([&] { return cluster.leader().has_value(); })) << seed;
     const std::uint32_t leader = cluster.leader_id();
     for (std::uint32_t id = 1; id <= 3; ++id) {
@@ -67,7 +67,7 @@ TEST(ElectionTest, HeartbeatsKeepLeaderInPlace) {
 }
 
 TEST(ElectionTest, SplitVoteIsResolvedInALaterTerm) {
-  Cluster cluster(4, 1, 64, false);
+  Cluster cluster(4, kPaperRaft);
   cluster.partition({{1, 3}, {2, 4}});
   cluster.campaign(1);
   cluster.campaign(2);

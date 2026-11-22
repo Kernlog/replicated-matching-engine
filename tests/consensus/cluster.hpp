@@ -15,10 +15,19 @@
 
 namespace rme::consensus {
 
+struct ClusterOptions {
+  std::uint64_t seed = 1;
+  std::size_t max_entries = 64;
+  bool pre_vote = true;
+  bool check_quorum = true;
+};
+
+// Base Raft as in the paper, without PreVote or CheckQuorum.
+inline constexpr ClusterOptions kPaperRaft{.pre_vote = false, .check_quorum = false};
+
 class Cluster {
  public:
-  explicit Cluster(std::uint32_t size, std::uint64_t seed = 1, std::size_t max_entries = 64,
-                   bool pre_vote = true)
+  explicit Cluster(std::uint32_t size, ClusterOptions options = {})
       : storage_(size), applied_(size), group_(size, 0) {
     for (std::uint32_t i = 1; i <= size; ++i) {
       members_.emplace_back(i);
@@ -26,9 +35,10 @@ class Cluster {
     for (const NodeId id : members_) {
       configs_.push_back(RaftConfig{.id = id,
                                     .members = members_,
-                                    .seed = seed * 1000 + id.value(),
-                                    .max_entries_per_append = max_entries,
-                                    .pre_vote = pre_vote});
+                                    .seed = options.seed * 1000 + id.value(),
+                                    .max_entries_per_append = options.max_entries,
+                                    .pre_vote = options.pre_vote,
+                                    .check_quorum = options.check_quorum});
       nodes_.emplace_back(configs_.back());
     }
   }

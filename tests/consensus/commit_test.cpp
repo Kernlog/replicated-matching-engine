@@ -87,7 +87,7 @@ TEST(CommitTest, RestartedFollowerReappliesCommittedLog) {
 }
 
 TEST(CommitTest, AppliedSequencesStayPrefixesAcrossLeaderChanges) {
-  Cluster cluster(3, 9);
+  Cluster cluster(3, {.seed = 9});
   for (int round = 0; round < 6; ++round) {
     const std::uint32_t leader = elect(cluster);
     cluster.propose(leader, 5);
