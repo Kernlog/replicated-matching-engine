@@ -39,6 +39,7 @@ class Raft {
   [[nodiscard]] Term term() const noexcept { return term_; }
   [[nodiscard]] std::optional<NodeId> leader() const noexcept { return leader_; }
   [[nodiscard]] const RaftLog& log() const noexcept { return log_; }
+  [[nodiscard]] Index commit() const noexcept { return commit_; }
 
  private:
   void become_follower(Term term, std::optional<NodeId> leader);
@@ -53,6 +54,7 @@ class Raft {
   void broadcast_append();
   void send_append(const Progress& peer);
   Progress& progress_of(NodeId id);
+  void maybe_commit();
   void reset_election_timer();
   void send(NodeId to, Body body);
   [[nodiscard]] bool is_quorum(std::size_t count) const noexcept;
@@ -76,6 +78,9 @@ class Raft {
   std::vector<NodeId> granted_;
   std::vector<Message> outbox_;
   std::vector<Progress> progress_;
+  std::vector<Index> matches_;
+  Index commit_;
+  Index applied_;
 };
 
 }  // namespace rme::consensus
