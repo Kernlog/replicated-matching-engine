@@ -47,6 +47,18 @@ jobs:
                 --benchmark_format=json --benchmark_out="$RUNNER_TEMP/out/$side/$round.json" >/dev/null
             done
           done
+          for side in base head; do
+            src=$([ "$side" = base ] && echo "$RUNNER_TEMP/base" || echo "$GITHUB_WORKSPACE")
+            bin="$src/build/bench/tools/replay"
+            [ -f "$bin" ] || continue
+            text=$(size -B "$bin" | awk 'NR == 2 { print $1 }')
+            file=$(stat -c %s "$bin")
+            printf '{"replay text": %s, "replay file": %s}\n' "$text" "$file" > "$RUNNER_TEMP/out/$side/sizes.json"
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bench-results
+          path: ${{ runner.temp }}/out
       - name: comment
         env:
           GH_TOKEN: ${{ github.token }}
