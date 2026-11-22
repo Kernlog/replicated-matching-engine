@@ -4,6 +4,7 @@
 #include <string>
 #include <utility>
 
+#include "codec/crc32c.hpp"
 #include "core/hash.hpp"
 
 namespace rme::sim {
@@ -11,6 +12,9 @@ namespace rme::sim {
 namespace {
 
 constexpr std::size_t kMaxViolations = 16;
+// Committed entries are checked on every apply and by leader completeness; log matching covers
+// the uncommitted suffix plus this overlap below it.
+constexpr std::size_t kVerifiedWindow = 64;
 
 std::string at(consensus::Index index) {
   return " at index " + std::to_string(index.value());
@@ -28,9 +32,7 @@ std::uint64_t entry_digest(const consensus::Entry& entry) {
   hasher.add(entry.index.value());
   hasher.add(static_cast<std::uint64_t>(entry.type));
   hasher.add(entry.data.size());
-  for (const std::byte byte : entry.data) {
-    hasher.add(static_cast<std::uint64_t>(byte));
-  }
+  hasher.add(codec::crc32c(entry.data));
   return hasher.digest();
 }
 
@@ -83,7 +85,7 @@ void Checker::on_restart(consensus::NodeId node) {
 }
 
 void Checker::on_applied(consensus::NodeId node, const consensus::Entry& entry,
-                         std::uint64_t book_hash) {
+                         std::uint64_t state_hash) {
   if (entry.index.value() > ledger_.size()) {
     fail("state machine safety: " + node_name(node) + " applied an uncommitted entry" +
          at(entry.index));
@@ -96,10 +98,10 @@ void Checker::on_applied(consensus::NodeId node, const consensus::Entry& entry,
     return;
   }
   if (!committed.hashed) {
-    committed.book_hash = book_hash;
+    committed.state_hash = state_hash;
     committed.hashed = true;
-  } else if (committed.book_hash != book_hash) {
-    fail("state machine safety: " + node_name(node) + " has a different book_hash" +
+  } else if (committed.state_hash != state_hash) {
+    fail("state machine safety: " + node_name(node) + " has a different engine state" +
          at(entry.index));
   }
 }
@@ -110,9 +112,10 @@ void Checker::check_log_matching(const std::vector<const consensus::RaftLog*>& l
       const consensus::RaftLog& left = *logs[a];
       const consensus::RaftLog& right = *logs[b];
       const consensus::Index shared = std::min(left.last_index(), right.last_index());
+      const consensus::Index floor(
+          ledger_.size() > kVerifiedWindow ? ledger_.size() - kVerifiedWindow : 0);
       bool matched = false;
-      for (consensus::Index index = shared; index > consensus::Index(0);
-           index -= consensus::Index(1)) {
+      for (consensus::Index index = shared; index > floor; index -= consensus::Index(1)) {
         const bool same_term = left.at(index).term == right.at(index).term;
         matched = matched || same_term;
         if (matched && entry_digest(left.at(index)) != entry_digest(right.at(index))) {

@@ -23,7 +23,7 @@ class Checker {
                         const consensus::RaftLog& log);
   void on_commit(consensus::NodeId node, consensus::Index commit);
   void on_restart(consensus::NodeId node);
-  void on_applied(consensus::NodeId node, const consensus::Entry& entry, std::uint64_t book_hash);
+  void on_applied(consensus::NodeId node, const consensus::Entry& entry, std::uint64_t state_hash);
   void check_log_matching(const std::vector<const consensus::RaftLog*>& logs);
 
   [[nodiscard]] bool ok() const noexcept { return violations_.empty(); }
@@ -35,7 +35,7 @@ class Checker {
     consensus::Term term;
     std::uint64_t digest = 0;
     consensus::Term committed_in;
-    std::uint64_t book_hash = 0;
+    std::uint64_t state_hash = 0;
     bool hashed = false;
   };
 

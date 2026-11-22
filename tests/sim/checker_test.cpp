@@ -78,7 +78,7 @@ TEST(CheckerTest, DivergentBookHash) {
   checker.on_leader_commit(Term(1), Index(1), log_of({1}));
   checker.on_applied(NodeId(1), entry(1, 1), 42);
   checker.on_applied(NodeId(2), entry(1, 1), 43);
-  expect_violation(checker, "book_hash");
+  expect_violation(checker, "engine state");
 }
 
 TEST(CheckerTest, CommitMovingBackwardsWithoutRestart) {
