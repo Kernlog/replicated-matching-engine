@@ -35,7 +35,8 @@ class OrderBook {
     const auto visit_level = [&](std::uint32_t slot) {
       const Level& level = side == Side::kBuy ? bids_[slot] : asks_[slot];
       for (std::uint32_t i = level.head; i != kNil; i = pool_[i].next) {
-        fn(pool_[i].order);
+        const OrderNode& node = pool_[i];
+        fn(RestingOrder{node.id, price_at(slot), node.qty});
       }
     };
     if (side == Side::kBuy) {
@@ -51,8 +52,8 @@ class OrderBook {
   void on(const Cancel& cancel, std::vector<Event>& out);
   void on(const Replace& replace, std::vector<Event>& out);
   void execute(const LimitOrder& order, std::vector<Event>& out);
-  void rest(Side side, const RestingOrder& order);
-  RestingOrder remove(std::uint32_t index);
+  void rest(Side side, OrderId id, Price price, Qty qty);
+  void remove(std::uint32_t index);
   [[nodiscard]] bool crossed() const noexcept;
   [[nodiscard]] bool in_band(Price price) const noexcept;
   [[nodiscard]] std::uint32_t slot(Price price) const noexcept;

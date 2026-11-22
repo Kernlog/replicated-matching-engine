@@ -17,12 +17,16 @@ struct RestingOrder {
 
 inline constexpr std::uint32_t kNil = std::numeric_limits<std::uint32_t>::max();
 
-struct OrderNode {
-  RestingOrder order;
+struct alignas(32) OrderNode {
+  OrderId id;
+  Qty qty;
   std::uint32_t prev = kNil;
   std::uint32_t next = kNil;
+  std::uint32_t slot = 0;
   Side side = Side::kBuy;
 };
+
+static_assert(sizeof(OrderNode) == 32);
 
 class OrderPool {
  public:
@@ -88,5 +92,7 @@ struct Level {
     }
   }
 };
+
+static_assert(sizeof(Level) == 8);
 
 }  // namespace rme::engine

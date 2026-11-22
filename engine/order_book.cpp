@@ -85,9 +85,9 @@ Qty OrderBook::match(Side taker_side, OrderId taker, Qty qty, Crosses crosses,
     Level& level = ladder[*best];
     while (qty > Qty(0) && !level.empty()) {
       const std::uint32_t head = level.head;
-      RestingOrder& maker = pool_[head].order;
+      OrderNode& maker = pool_[head];
       const Qty traded = std::min(qty, maker.qty);
-      out.emplace_back(Fill{taker, maker.id, maker.price, traded});
+      out.emplace_back(Fill{taker, maker.id, price_at(*best), traded});
       qty -= traded;
       maker.qty -= traded;
       if (maker.qty == Qty(0)) {
@@ -130,8 +130,8 @@ void OrderBook::on(const Cancel& cancel, std::vector<Event>& out) {
     out.emplace_back(Rejected{cancel.id, RejectReason::kUnknownOrder});
     return;
   }
-  const RestingOrder removed = remove(found);
-  out.emplace_back(Cancelled{removed.id, removed.qty});
+  out.emplace_back(Cancelled{cancel.id, pool_[found].qty});
+  remove(found);
 }
 
 void OrderBook::on(const Replace& replace, std::vector<Event>& out) {
@@ -146,8 +146,8 @@ void OrderBook::on(const Replace& replace, std::vector<Event>& out) {
   }
   out.emplace_back(Replaced{replace.id, replace.price, replace.qty});
   OrderNode& node = pool_[found];
-  if (replace.price == node.order.price && replace.qty <= node.order.qty) {
-    node.order.qty = replace.qty;
+  if (slot(replace.price) == node.slot && replace.qty <= node.qty) {
+    node.qty = replace.qty;
     return;
   }
   const Side side = node.side;
@@ -164,36 +164,37 @@ void OrderBook::execute(const LimitOrder& order, std::vector<Event>& out) {
                 order.side, order.id, order.qty, [&](Price bid) { return bid >= order.price; },
                 out);
   if (remaining > Qty(0)) {
-    rest(order.side, RestingOrder{order.id, order.price, remaining});
+    rest(order.side, order.id, order.price, remaining);
   }
 }
 
-RestingOrder OrderBook::remove(std::uint32_t index) {
-  const OrderNode node = pool_[index];
+void OrderBook::remove(std::uint32_t index) {
+  const OrderNode& node = pool_[index];
   PriceLadder& ladder = node.side == Side::kBuy ? bids_ : asks_;
-  const std::uint32_t at = slot(node.order.price);
-  Level& level = ladder[at];
+  Level& level = ladder[node.slot];
   level.unlink(pool_, index);
   if (level.empty()) {
-    ladder.clear(at);
+    ladder.clear(node.slot);
   }
-  index_.erase(node.order.id);
+  index_.erase(node.id);
   pool_.release(index);
-  return node.order;
 }
 
-void OrderBook::rest(Side side, const RestingOrder& order) {
+void OrderBook::rest(Side side, OrderId id, Price price, Qty qty) {
   const std::uint32_t index = pool_.acquire();
-  pool_[index].order = order;
-  pool_[index].side = side;
+  const std::uint32_t at = slot(price);
+  OrderNode& node = pool_[index];
+  node.id = id;
+  node.qty = qty;
+  node.slot = at;
+  node.side = side;
   PriceLadder& ladder = side == Side::kBuy ? bids_ : asks_;
-  const std::uint32_t at = slot(order.price);
   Level& level = ladder[at];
   if (level.empty()) {
     ladder.mark(at);
   }
   level.push_back(pool_, index);
-  const bool inserted = index_.insert(order.id, index);
+  const bool inserted = index_.insert(id, index);
   RME_ASSERT(inserted);
 }
 
