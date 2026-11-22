@@ -35,5 +35,6 @@ add_subdirectory(core)
 add_subdirectory(engine)
 
 if(BUILD_TESTING)
+  add_subdirectory(testing)
   add_subdirectory(tests)
 endif()
