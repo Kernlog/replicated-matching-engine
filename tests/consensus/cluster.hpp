@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -18,6 +19,7 @@ namespace rme::consensus {
 struct ClusterOptions {
   std::uint64_t seed = 1;
   std::size_t max_entries = 64;
+  std::size_t max_entry_bytes = 1;
   bool pre_vote = true;
   bool check_quorum = true;
 };
@@ -37,6 +39,7 @@ class Cluster {
                                     .members = members_,
                                     .seed = options.seed * 1000 + id.value(),
                                     .max_entries_per_append = options.max_entries,
+                                    .max_entry_bytes = options.max_entry_bytes,
                                     .pre_vote = options.pre_vote,
                                     .check_quorum = options.check_quorum});
       nodes_.emplace_back(configs_.back());
@@ -145,8 +148,8 @@ class Cluster {
 
   void propose(std::uint32_t id, int count) {
     for (int i = 0; i < count; ++i) {
-      const auto payload = static_cast<std::byte>(next_payload_++);
-      node(id).propose({payload});
+      const std::array payload{static_cast<std::byte>(next_payload_++)};
+      node(id).propose(payload);
     }
     deliver();
   }
