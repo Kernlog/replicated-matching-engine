@@ -1,2 +1,2 @@
-add_library(rme_consensus INTERFACE)
-target_link_libraries(rme_consensus INTERFACE rme_core)
+add_library(rme_consensus STATIC raft_log.cpp)
+target_link_libraries(rme_consensus PUBLIC rme_core)
