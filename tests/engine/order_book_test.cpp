@@ -48,6 +48,12 @@ class OrderBookTest : public ::testing::Test {
     return out;
   }
 
+  std::vector<Event> replace(std::uint64_t id, std::int64_t price, std::int64_t qty) {
+    std::vector<Event> out;
+    book_.apply(Replace{OrderId(id), Price(price), Qty(qty)}, out);
+    return out;
+  }
+
   OrderBook book_;
 };
 
@@ -197,6 +203,45 @@ TEST_F(OrderBookTest, CancelKeepsRemainingOrdersInPriority) {
   EXPECT_EQ(ids(book_, Side::kBuy), (std::vector<std::uint64_t>{1, 3}));
   EXPECT_EQ(limit(4, Side::kSell, 100, 1),
             (std::vector<Event>{Accepted{OrderId(4)}, fill(4, 1, 100, 1)}));
+}
+
+Replaced replaced(std::uint64_t id, std::int64_t price, std::int64_t qty) {
+  return Replaced{OrderId(id), Price(price), Qty(qty)};
+}
+
+TEST_F(OrderBookTest, ReplaceQtyDownAtSamePriceKeepsPriority) {
+  limit(1, Side::kBuy, 100, 5);
+  limit(2, Side::kBuy, 100, 5);
+  EXPECT_EQ(replace(1, 100, 3), std::vector<Event>{replaced(1, 100, 3)});
+  EXPECT_EQ(resting(book_, Side::kBuy), (Resting{{1, 3}, {2, 5}}));
+}
+
+TEST_F(OrderBookTest, ReplaceQtyUpLosesPriority) {
+  limit(1, Side::kBuy, 100, 5);
+  limit(2, Side::kBuy, 100, 5);
+  replace(1, 100, 8);
+  EXPECT_EQ(resting(book_, Side::kBuy), (Resting{{2, 5}, {1, 8}}));
+}
+
+TEST_F(OrderBookTest, ReplacePriceMovesOrderToNewLevel) {
+  limit(1, Side::kSell, 101, 5);
+  limit(2, Side::kSell, 102, 5);
+  replace(1, 103, 5);
+  EXPECT_EQ(book_.best_ask(), Price(102));
+  EXPECT_EQ(resting(book_, Side::kSell), (Resting{{2, 5}, {1, 5}}));
+}
+
+TEST_F(OrderBookTest, ReplaceThatCrossesTradesImmediately) {
+  limit(1, Side::kBuy, 99, 5);
+  limit(2, Side::kSell, 101, 3);
+  EXPECT_EQ(replace(1, 101, 5), (std::vector<Event>{replaced(1, 101, 5), fill(1, 2, 101, 3)}));
+  EXPECT_EQ(resting(book_, Side::kBuy), (Resting{{1, 2}}));
+  EXPECT_FALSE(book_.best_ask());
+}
+
+TEST_F(OrderBookTest, ReplaceUnknownOrderIsRejected) {
+  EXPECT_EQ(replace(7, 100, 1),
+            (std::vector<Event>{Rejected{OrderId(7), RejectReason::kUnknownOrder}}));
 }
 
 }  // namespace

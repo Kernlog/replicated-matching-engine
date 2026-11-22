@@ -38,6 +38,14 @@ struct Rejected {
   friend bool operator==(const Rejected&, const Rejected&) = default;
 };
 
-using Event = std::variant<Accepted, Fill, Cancelled, Rejected>;
+struct Replaced {
+  OrderId id;
+  Price price;
+  Qty qty;
+
+  friend bool operator==(const Replaced&, const Replaced&) = default;
+};
+
+using Event = std::variant<Accepted, Fill, Cancelled, Rejected, Replaced>;
 
 }  // namespace rme::engine

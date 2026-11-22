@@ -29,6 +29,14 @@ struct Cancel {
   friend bool operator==(const Cancel&, const Cancel&) = default;
 };
 
-using Command = std::variant<LimitOrder, MarketOrder, Cancel>;
+struct Replace {
+  OrderId id;
+  Price price;
+  Qty qty;
+
+  friend bool operator==(const Replace&, const Replace&) = default;
+};
+
+using Command = std::variant<LimitOrder, MarketOrder, Cancel, Replace>;
 
 }  // namespace rme::engine

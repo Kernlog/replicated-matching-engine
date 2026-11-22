@@ -49,6 +49,27 @@ Qty OrderBook::match(Levels& levels, OrderId taker, Qty qty, Crosses crosses,
 
 void OrderBook::on(const LimitOrder& order, std::vector<Event>& out) {
   out.emplace_back(Accepted{order.id});
+  execute(order, out);
+}
+
+void OrderBook::on(const Replace& replace, std::vector<Event>& out) {
+  const auto found = index_.find(replace.id);
+  if (found == index_.end()) {
+    out.emplace_back(Rejected{replace.id, RejectReason::kUnknownOrder});
+    return;
+  }
+  out.emplace_back(Replaced{replace.id, replace.price, replace.qty});
+  auto& [side, it] = found->second;
+  if (replace.price == it->price && replace.qty <= it->qty) {
+    it->qty = replace.qty;
+    return;
+  }
+  const Side order_side = side;
+  remove(found);
+  execute(LimitOrder{replace.id, order_side, replace.price, replace.qty}, out);
+}
+
+void OrderBook::execute(const LimitOrder& order, std::vector<Event>& out) {
   const Qty remaining =
       order.side == Side::kBuy
           ? match(
