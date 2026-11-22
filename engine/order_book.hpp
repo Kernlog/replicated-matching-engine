@@ -66,6 +66,8 @@ class OrderBook {
   template <typename Levels>
   static void unlink(Levels& levels, Queue::iterator it);
   [[nodiscard]] bool crossed() const noexcept;
+  [[nodiscard]] std::optional<RejectReason> reject_reason(OrderId id, std::optional<Price> price,
+                                                          Qty qty) const;
 
   template <typename Levels, typename Crosses>
   Qty match(Levels& levels, OrderId taker, Qty qty, Crosses crosses, std::vector<Event>& out);

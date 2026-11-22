@@ -29,7 +29,12 @@ struct Cancelled {
   friend bool operator==(const Cancelled&, const Cancelled&) = default;
 };
 
-enum class RejectReason : std::uint8_t { kUnknownOrder };
+enum class RejectReason : std::uint8_t {
+  kUnknownOrder,
+  kDuplicateId,
+  kInvalidQty,
+  kInvalidPrice,
+};
 
 struct Rejected {
   OrderId id;
