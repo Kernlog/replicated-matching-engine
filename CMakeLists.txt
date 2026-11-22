@@ -9,6 +9,7 @@ set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 option(RME_WERROR "Treat warnings as errors" ON)
 option(RME_BUILD_BENCH "Build benchmarks" OFF)
+option(RME_BUILD_FUZZ "Build libFuzzer targets (clang only)" OFF)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
   set(RME_ARCH "x86-64-v3" CACHE STRING "Value passed to -march; empty to disable")
@@ -46,4 +47,8 @@ endif()
 
 if(RME_BUILD_BENCH)
   add_subdirectory(bench)
+endif()
+
+if(RME_BUILD_FUZZ)
+  add_subdirectory(fuzz)
 endif()

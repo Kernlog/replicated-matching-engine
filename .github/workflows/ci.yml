@@ -51,6 +51,20 @@ jobs:
       - run: cmake --build --preset asan
       - run: ctest --preset asan
 
+  fuzz:
+    runs-on: ubuntu-24.04
+    env:
+      CXX: clang++-18
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: clang-fuzz
+      - run: cmake --preset fuzz
+      - run: cmake --build --preset fuzz
+      - run: build/fuzz/fuzz/decode_fuzz -max_total_time=30 -print_final_stats=1
+
   tidy:
     runs-on: ubuntu-24.04
     env:
