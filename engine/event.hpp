@@ -21,6 +21,13 @@ struct Fill {
   friend bool operator==(const Fill&, const Fill&) = default;
 };
 
-using Event = std::variant<Accepted, Fill>;
+struct Cancelled {
+  OrderId id;
+  Qty qty;
+
+  friend bool operator==(const Cancelled&, const Cancelled&) = default;
+};
+
+using Event = std::variant<Accepted, Fill, Cancelled>;
 
 }  // namespace rme::engine

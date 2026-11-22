@@ -15,6 +15,14 @@ struct LimitOrder {
   friend bool operator==(const LimitOrder&, const LimitOrder&) = default;
 };
 
-using Command = std::variant<LimitOrder>;
+struct MarketOrder {
+  OrderId id;
+  Side side;
+  Qty qty;
+
+  friend bool operator==(const MarketOrder&, const MarketOrder&) = default;
+};
+
+using Command = std::variant<LimitOrder, MarketOrder>;
 
 }  // namespace rme::engine

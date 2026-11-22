@@ -56,6 +56,7 @@ class OrderBook {
   }
 
   void on(const LimitOrder& order, std::vector<Event>& out);
+  void on(const MarketOrder& order, std::vector<Event>& out);
   void rest(Side side, const RestingOrder& order);
   [[nodiscard]] bool crossed() const noexcept;
 
