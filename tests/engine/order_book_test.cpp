@@ -282,5 +282,24 @@ TEST_F(OrderBookTest, RejectsInvalidReplaceWithoutTouchingOrder) {
   EXPECT_EQ(resting(book_, Side::kBuy), (Resting{{1, 5}}));
 }
 
+TEST(OrderBookCapacityTest, RejectsRestingOrdersWhenPoolIsFullAndReusesFreedSlots) {
+  OrderBook book(BookConfig{.max_orders = 2});
+  std::vector<Event> out;
+  book.apply(LimitOrder{OrderId(1), Side::kBuy, Price(100), Qty(1)}, out);
+  book.apply(LimitOrder{OrderId(2), Side::kBuy, Price(99), Qty(1)}, out);
+  out.clear();
+  book.apply(LimitOrder{OrderId(3), Side::kBuy, Price(98), Qty(1)}, out);
+  EXPECT_EQ(out, rejected(3, RejectReason::kBookFull));
+
+  out.clear();
+  book.apply(MarketOrder{OrderId(4), Side::kSell, Qty(1)}, out);
+  EXPECT_EQ(out, (std::vector<Event>{Accepted{OrderId(4)}, fill(4, 1, 100, 1)}));
+
+  out.clear();
+  book.apply(LimitOrder{OrderId(5), Side::kBuy, Price(98), Qty(1)}, out);
+  EXPECT_EQ(out, std::vector<Event>{Accepted{OrderId(5)}});
+  EXPECT_EQ(book.size(), 2U);
+}
+
 }  // namespace
 }  // namespace rme::engine
