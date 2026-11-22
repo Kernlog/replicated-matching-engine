@@ -1,0 +1,69 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <vector>
+
+#include "consensus/raft_log.hpp"
+#include "consensus/types.hpp"
+#include "core/rng.hpp"
+
+namespace rme::consensus {
+
+struct RaftConfig {
+  NodeId id;
+  std::vector<NodeId> members;
+  std::uint32_t election_ticks = 10;
+  std::uint32_t heartbeat_ticks = 1;
+  std::uint64_t seed = 1;
+};
+
+enum class Role : std::uint8_t { kFollower, kCandidate, kLeader };
+
+class Raft {
+ public:
+  explicit Raft(RaftConfig config, HardState state = {}, std::vector<Entry> log = {});
+
+  void tick();
+  void step(const Message& message);
+
+  [[nodiscard]] bool has_ready() const noexcept;
+  Ready ready();
+
+  [[nodiscard]] NodeId id() const noexcept { return config_.id; }
+  [[nodiscard]] Role role() const noexcept { return role_; }
+  [[nodiscard]] Term term() const noexcept { return term_; }
+  [[nodiscard]] std::optional<NodeId> leader() const noexcept { return leader_; }
+  [[nodiscard]] const RaftLog& log() const noexcept { return log_; }
+
+ private:
+  void become_follower(Term term, std::optional<NodeId> leader);
+  void campaign();
+  void become_leader();
+  void broadcast_heartbeat();
+  void reset_election_timer();
+  void send(NodeId to, Body body);
+  [[nodiscard]] bool is_quorum(std::size_t count) const noexcept;
+  [[nodiscard]] HardState hard_state() const noexcept { return {term_, vote_}; }
+
+  void on(const Message& message, const VoteRequest& request);
+  void on(const Message& message, const VoteResponse& response);
+  void on(const Message& message, const AppendRequest& request);
+  void on(const Message& message, const AppendResponse& response);
+
+  RaftConfig config_;
+  Rng rng_;
+  RaftLog log_;
+  Role role_ = Role::kFollower;
+  Term term_;
+  std::optional<NodeId> vote_;
+  std::optional<NodeId> leader_;
+  HardState saved_;
+  std::uint32_t elapsed_ = 0;
+  std::uint32_t timeout_ = 0;
+  std::vector<NodeId> granted_;
+  std::vector<Message> outbox_;
+};
+
+}  // namespace rme::consensus
