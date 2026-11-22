@@ -25,6 +25,10 @@ class Disk {
   void append(std::span<const consensus::Entry> entries);
   void sync();
   void crash(Crash mode);
+  // The next sync crashes instead of completing, as power loss during fsync would.
+  void crash_on_next_sync(Crash mode) noexcept { armed_ = mode; }
+  [[nodiscard]] bool crashed() const noexcept { return crashed_; }
+  void restarted() noexcept { crashed_ = false; }
   // Flips a bit in a synced entry without updating its checksum.
   void corrupt(consensus::Index index);
   // The first synced entry whose checksum no longer matches.
@@ -51,6 +55,8 @@ class Disk {
   std::vector<std::uint64_t> sums_;
   bool state_dirty_ = false;
   std::optional<std::size_t> dirty_from_;
+  std::optional<Crash> armed_;
+  bool crashed_ = false;
 };
 
 static_assert(consensus::Storage<Disk>);
