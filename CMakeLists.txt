@@ -42,6 +42,8 @@ if(BUILD_TESTING OR RME_BUILD_BENCH)
   add_subdirectory(testing)
 endif()
 
+add_subdirectory(tools)
+
 if(BUILD_TESTING)
   add_subdirectory(tests)
 endif()
