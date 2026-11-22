@@ -42,6 +42,12 @@ class OrderBookTest : public ::testing::Test {
     return out;
   }
 
+  std::vector<Event> cancel(std::uint64_t id) {
+    std::vector<Event> out;
+    book_.apply(Cancel{OrderId(id)}, out);
+    return out;
+  }
+
   OrderBook book_;
 };
 
@@ -156,6 +162,41 @@ TEST_F(OrderBookTest, MarketOrderCancelsUnfilledRemainder) {
             (std::vector<Event>{Accepted{OrderId(2)}, fill(2, 1, 100, 4),
                                 Cancelled{OrderId(2), Qty(6)}}));
   EXPECT_EQ(book_.size(), 0U);
+}
+
+TEST_F(OrderBookTest, CancelReportsRemainingQtyAfterPartialFill) {
+  limit(1, Side::kBuy, 100, 10);
+  limit(2, Side::kSell, 100, 4);
+  EXPECT_EQ(cancel(1), (std::vector<Event>{Cancelled{OrderId(1), Qty(6)}}));
+  EXPECT_EQ(book_.size(), 0U);
+  EXPECT_FALSE(book_.best_bid());
+}
+
+TEST_F(OrderBookTest, CancelUnknownOrderIsRejected) {
+  EXPECT_EQ(cancel(9), (std::vector<Event>{Rejected{OrderId(9), RejectReason::kUnknownOrder}}));
+}
+
+TEST_F(OrderBookTest, CancelTwiceRejectsSecond) {
+  limit(1, Side::kSell, 101, 1);
+  cancel(1);
+  EXPECT_EQ(cancel(1), (std::vector<Event>{Rejected{OrderId(1), RejectReason::kUnknownOrder}}));
+}
+
+TEST_F(OrderBookTest, CancelLastOrderAtBestLevelMovesBestPrice) {
+  limit(1, Side::kSell, 101, 1);
+  limit(2, Side::kSell, 102, 1);
+  cancel(1);
+  EXPECT_EQ(book_.best_ask(), Price(102));
+}
+
+TEST_F(OrderBookTest, CancelKeepsRemainingOrdersInPriority) {
+  limit(1, Side::kBuy, 100, 1);
+  limit(2, Side::kBuy, 100, 1);
+  limit(3, Side::kBuy, 100, 1);
+  cancel(2);
+  EXPECT_EQ(ids(book_, Side::kBuy), (std::vector<std::uint64_t>{1, 3}));
+  EXPECT_EQ(limit(4, Side::kSell, 100, 1),
+            (std::vector<Event>{Accepted{OrderId(4)}, fill(4, 1, 100, 1)}));
 }
 
 }  // namespace
