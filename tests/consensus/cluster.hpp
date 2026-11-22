@@ -20,6 +20,7 @@ struct ClusterOptions {
   std::uint64_t seed = 1;
   std::size_t max_entries = 64;
   std::size_t max_entry_bytes = 1;
+  std::uint32_t max_inflight = 8;
   bool pre_vote = true;
   bool check_quorum = true;
 };
@@ -40,6 +41,7 @@ class Cluster {
                                     .seed = options.seed * 1000 + id.value(),
                                     .max_entries_per_append = options.max_entries,
                                     .max_entry_bytes = options.max_entry_bytes,
+                                    .max_inflight = options.max_inflight,
                                     .pre_vote = options.pre_vote,
                                     .check_quorum = options.check_quorum});
       nodes_.emplace_back(configs_.back());
@@ -73,6 +75,10 @@ class Cluster {
   }
 
   [[nodiscard]] int rejections() const noexcept { return rejections_; }
+  [[nodiscard]] std::size_t entries_sent() const noexcept { return entries_sent_; }
+
+  // Drops every nth message in flight from now on; 0 disables loss.
+  void drop_every(int nth) { drop_every_ = nth; }
 
   [[nodiscard]] const MemoryStorage& storage(std::uint32_t id) const { return storage_.at(id - 1); }
   [[nodiscard]] const std::vector<Entry>& applied(std::uint32_t id) const {
@@ -184,6 +190,12 @@ class Cluster {
     std::vector<Message> messages;
 
     void send(Message&& message) {
+      if (const auto* append = std::get_if<AppendRequest>(&message.body)) {
+        cluster->entries_sent_ += append->entries.size();
+      }
+      if (cluster->drop_every_ != 0 && ++cluster->sent_ % cluster->drop_every_ == 0) {
+        return;
+      }
       if (cluster->connected(message.from, message.to)) {
         messages.push_back(std::move(message));
       }
@@ -208,6 +220,9 @@ class Cluster {
   std::vector<int> group_;
   unsigned next_payload_ = 0;
   int rejections_ = 0;
+  std::size_t entries_sent_ = 0;
+  int drop_every_ = 0;
+  int sent_ = 0;
 };
 
 }  // namespace rme::consensus
