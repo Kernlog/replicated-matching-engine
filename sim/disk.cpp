@@ -32,4 +32,31 @@ void Disk::sync() {
   dirty_from_.reset();
 }
 
+void Disk::crash(Crash mode) {
+  if (mode == Crash::kTornTail) {
+    tear();
+  }
+  written_ = durable_;
+  state_dirty_ = false;
+  dirty_from_.reset();
+}
+
+void Disk::tear() {
+  const std::size_t from = dirty_from_.value_or(written_.entries.size());
+  const std::size_t writes = (state_dirty_ ? 1U : 0U) + (written_.entries.size() - from);
+  if (writes == 0) {
+    return;
+  }
+  std::size_t kept = rng_.below(writes);
+  if (kept > 0 && state_dirty_) {
+    durable_.state = written_.state;
+    --kept;
+  }
+  if (kept > 0) {
+    const auto fresh = std::span(written_.entries).subspan(from, kept);
+    durable_.entries.resize(from);
+    durable_.entries.insert(durable_.entries.end(), fresh.begin(), fresh.end());
+  }
+}
+
 }  // namespace rme::sim
