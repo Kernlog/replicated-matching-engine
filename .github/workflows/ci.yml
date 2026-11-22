@@ -60,8 +60,8 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           cache-key: clang-tidy
-      - run: cmake --preset release
-      - run: git ls-files '*.cpp' | xargs -r clang-tidy-18 -p build/release --quiet
+      - run: cmake --preset release -DRME_BUILD_BENCH=ON -DVCPKG_MANIFEST_FEATURES=bench
+      - run: run-clang-tidy-18 -p build/release -quiet
 
   format:
     runs-on: ubuntu-24.04
