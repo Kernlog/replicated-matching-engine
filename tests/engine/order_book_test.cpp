@@ -244,5 +244,43 @@ TEST_F(OrderBookTest, ReplaceUnknownOrderIsRejected) {
             (std::vector<Event>{Rejected{OrderId(7), RejectReason::kUnknownOrder}}));
 }
 
+std::vector<Event> rejected(std::uint64_t id, RejectReason reason) {
+  return {Rejected{OrderId(id), reason}};
+}
+
+TEST_F(OrderBookTest, RejectsNonPositiveQty) {
+  EXPECT_EQ(limit(1, Side::kBuy, 100, 0), rejected(1, RejectReason::kInvalidQty));
+  EXPECT_EQ(limit(2, Side::kBuy, 100, -5), rejected(2, RejectReason::kInvalidQty));
+  EXPECT_EQ(market(3, Side::kSell, 0), rejected(3, RejectReason::kInvalidQty));
+  EXPECT_EQ(book_.size(), 0U);
+}
+
+TEST_F(OrderBookTest, RejectsNonPositivePrice) {
+  EXPECT_EQ(limit(1, Side::kSell, 0, 5), rejected(1, RejectReason::kInvalidPrice));
+  EXPECT_EQ(limit(2, Side::kSell, -1, 5), rejected(2, RejectReason::kInvalidPrice));
+  EXPECT_EQ(book_.size(), 0U);
+}
+
+TEST_F(OrderBookTest, RejectsDuplicateRestingId) {
+  limit(1, Side::kBuy, 100, 5);
+  EXPECT_EQ(limit(1, Side::kSell, 105, 5), rejected(1, RejectReason::kDuplicateId));
+  EXPECT_EQ(market(1, Side::kSell, 5), rejected(1, RejectReason::kDuplicateId));
+  EXPECT_EQ(resting(book_, Side::kBuy), (Resting{{1, 5}}));
+  EXPECT_FALSE(book_.best_ask());
+}
+
+TEST_F(OrderBookTest, AllowsReuseOfFullyFilledId) {
+  limit(1, Side::kBuy, 100, 5);
+  limit(2, Side::kSell, 100, 5);
+  EXPECT_EQ(limit(1, Side::kBuy, 99, 1), std::vector<Event>{Accepted{OrderId(1)}});
+}
+
+TEST_F(OrderBookTest, RejectsInvalidReplaceWithoutTouchingOrder) {
+  limit(1, Side::kBuy, 100, 5);
+  EXPECT_EQ(replace(1, 100, 0), rejected(1, RejectReason::kInvalidQty));
+  EXPECT_EQ(replace(1, 0, 5), rejected(1, RejectReason::kInvalidPrice));
+  EXPECT_EQ(resting(book_, Side::kBuy), (Resting{{1, 5}}));
+}
+
 }  // namespace
 }  // namespace rme::engine
