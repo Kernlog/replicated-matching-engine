@@ -98,6 +98,28 @@ class Cluster {
     return found;
   }
 
+  void propose(std::uint32_t id, int count) {
+    for (int i = 0; i < count; ++i) {
+      const auto payload = static_cast<std::byte>(next_payload_++);
+      node(id).propose({payload});
+    }
+    deliver();
+  }
+
+  [[nodiscard]] std::vector<Entry> log_of(std::uint32_t id) {
+    const auto entries = node(id).log().slice(Index(1), SIZE_MAX);
+    return {entries.begin(), entries.end()};
+  }
+
+  [[nodiscard]] bool logs_converged() {
+    for (std::uint32_t id = 2; id <= nodes_.size(); ++id) {
+      if (log_of(id) != log_of(1)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   std::uint32_t leader_id() { return leader().value_or(0); }
 
   template <typename Predicate>
@@ -136,6 +158,7 @@ class Cluster {
   std::vector<MemoryStorage> storage_;
   std::vector<Applied> applied_;
   std::vector<int> group_;
+  unsigned next_payload_ = 0;
 };
 
 }  // namespace rme::consensus
