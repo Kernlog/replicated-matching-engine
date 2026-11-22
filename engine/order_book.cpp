@@ -59,6 +59,17 @@ void OrderBook::on(const LimitOrder& order, std::vector<Event>& out) {
   }
 }
 
+void OrderBook::on(const MarketOrder& order, std::vector<Event>& out) {
+  out.emplace_back(Accepted{order.id});
+  const auto any_price = [](Price) { return true; };
+  const Qty remaining = order.side == Side::kBuy
+                            ? match(asks_, order.id, order.qty, any_price, out)
+                            : match(bids_, order.id, order.qty, any_price, out);
+  if (remaining > Qty(0)) {
+    out.emplace_back(Cancelled{order.id, remaining});
+  }
+}
+
 void OrderBook::rest(Side side, const RestingOrder& order) {
   auto& queue = side == Side::kBuy ? bids_[order.price] : asks_[order.price];
   queue.push_back(order);

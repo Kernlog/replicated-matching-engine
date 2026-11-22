@@ -36,6 +36,12 @@ class OrderBookTest : public ::testing::Test {
     return out;
   }
 
+  std::vector<Event> market(std::uint64_t id, Side side, std::int64_t qty) {
+    std::vector<Event> out;
+    book_.apply(MarketOrder{OrderId(id), side, Qty(qty)}, out);
+    return out;
+  }
+
   OrderBook book_;
 };
 
@@ -127,6 +133,29 @@ TEST_F(OrderBookTest, SellAggressorStopsAtLimitAndRestsRemainder) {
   EXPECT_EQ(resting(book_, Side::kSell), (Resting{{3, 3}}));
   EXPECT_EQ(resting(book_, Side::kBuy), (Resting{{2, 2}}));
   EXPECT_EQ(book_.best_ask(), Price(100));
+}
+
+TEST_F(OrderBookTest, MarketOrderSweepsLevelsAndNeverRests) {
+  limit(1, Side::kSell, 101, 2);
+  limit(2, Side::kSell, 105, 2);
+  EXPECT_EQ(market(3, Side::kBuy, 3),
+            (std::vector<Event>{Accepted{OrderId(3)}, fill(3, 1, 101, 2), fill(3, 2, 105, 1)}));
+  EXPECT_EQ(resting(book_, Side::kBuy), Resting{});
+  EXPECT_EQ(resting(book_, Side::kSell), (Resting{{2, 1}}));
+}
+
+TEST_F(OrderBookTest, MarketOrderOnEmptyBookCancelsEverything) {
+  EXPECT_EQ(market(1, Side::kSell, 7),
+            (std::vector<Event>{Accepted{OrderId(1)}, Cancelled{OrderId(1), Qty(7)}}));
+  EXPECT_EQ(book_.size(), 0U);
+}
+
+TEST_F(OrderBookTest, MarketOrderCancelsUnfilledRemainder) {
+  limit(1, Side::kBuy, 100, 4);
+  EXPECT_EQ(market(2, Side::kSell, 10),
+            (std::vector<Event>{Accepted{OrderId(2)}, fill(2, 1, 100, 4),
+                                Cancelled{OrderId(2), Qty(6)}}));
+  EXPECT_EQ(book_.size(), 0U);
 }
 
 }  // namespace
