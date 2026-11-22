@@ -1,0 +1,36 @@
+name: tlc
+
+on:
+  pull_request:
+    paths: [spec/**, .github/workflows/tlc.yml]
+  push:
+    branches: [main]
+    paths: [spec/**, .github/workflows/tlc.yml]
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TLA_VERSION: v1.7.4
+  TLA_SHA256: 936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88
+
+jobs:
+  tlc:
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ github.event_name == 'schedule' && 300 || 20 }}
+    defaults:
+      run:
+        working-directory: spec
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          curl -fsSL -o tla2tools.jar "https://github.com/tlaplus/tlaplus/releases/download/$TLA_VERSION/tla2tools.jar"
+          echo "$TLA_SHA256  tla2tools.jar" | sha256sum -c -
+      - run: >
+          "$JAVA_HOME_21_X64/bin/java" -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC
+          -workers auto -deadlock -cleanup
+          -config ${{ github.event_name == 'schedule' && 'RaftNightly.cfg' || 'Raft.cfg' }} Raft.tla
