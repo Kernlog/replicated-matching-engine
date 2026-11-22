@@ -83,6 +83,22 @@ TEST(DiskTest, CrashLosesUnsyncedEntriesAndKeepsSyncedOnes) {
   EXPECT_EQ(disk.entries(), batch(1, 3, 1));
 }
 
+TEST(DiskTest, ArmedSyncCrashesInsteadOfCompleting) {
+  Disk disk(1);
+  disk.append(batch(1, 2, 1));
+  disk.sync();
+  disk.append(batch(3, 2, 1));
+  disk.crash_on_next_sync(Crash::kClean);
+  disk.sync();
+  EXPECT_TRUE(disk.crashed());
+  EXPECT_EQ(disk.entries(), batch(1, 2, 1));
+  disk.restarted();
+  EXPECT_FALSE(disk.crashed());
+  disk.append(batch(3, 1, 2));
+  disk.sync();
+  EXPECT_EQ(disk.entries(), concat(batch(1, 2, 1), batch(3, 1, 2)));
+}
+
 TEST(DiskTest, CrashUndoesAnUnsyncedTruncation) {
   Disk disk(1);
   disk.append(batch(1, 5, 1));

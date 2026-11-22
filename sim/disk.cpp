@@ -42,6 +42,12 @@ void Disk::append(std::span<const consensus::Entry> entries) {
 }
 
 void Disk::sync() {
+  if (armed_) {
+    crash(*armed_);
+    armed_.reset();
+    crashed_ = true;
+    return;
+  }
   durable_.state = written_.state;
   const std::size_t from = dirty_from_.value_or(written_.entries.size());
   persist(from, std::span(written_.entries).subspan(from));
