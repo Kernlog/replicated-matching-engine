@@ -66,3 +66,5 @@ vcpkg_installed/
 # test output & cache
 .cache/
 notes/
+spec/states/
+spec/*_TTrace_*
