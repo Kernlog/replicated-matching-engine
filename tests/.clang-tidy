@@ -1,5 +1,9 @@
 InheritParentConfig: true
 Checks: >
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -cppcoreguidelines-no-malloc,
+  -cppcoreguidelines-owning-memory,
+  -misc-new-delete-overloads,
   -concurrency-mt-unsafe,
   -cppcoreguidelines-non-private-member-variables-in-classes,
   -readability-function-cognitive-complexity
