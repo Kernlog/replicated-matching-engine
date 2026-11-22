@@ -40,6 +40,7 @@ if(BUILD_TESTING OR RME_BUILD_BENCH)
 endif()
 
 if(BUILD_TESTING)
+  add_subdirectory(testing)
   add_subdirectory(tests)
 endif()
 
