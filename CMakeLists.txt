@@ -37,6 +37,7 @@ add_subdirectory(core)
 add_subdirectory(engine)
 add_subdirectory(codec)
 add_subdirectory(log)
+add_subdirectory(consensus)
 
 if(BUILD_TESTING OR RME_BUILD_BENCH)
   add_subdirectory(testing)

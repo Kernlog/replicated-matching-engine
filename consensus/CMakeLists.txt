@@ -1,0 +1,2 @@
+add_library(rme_consensus INTERFACE)
+target_link_libraries(rme_consensus INTERFACE rme_core)
