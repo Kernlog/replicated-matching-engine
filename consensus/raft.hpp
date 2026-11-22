@@ -40,6 +40,7 @@ class Raft {
   [[nodiscard]] std::optional<NodeId> leader() const noexcept { return leader_; }
   [[nodiscard]] const RaftLog& log() const noexcept { return log_; }
   [[nodiscard]] Index commit() const noexcept { return commit_; }
+  [[nodiscard]] std::uint64_t dropped() const noexcept { return dropped_; }
 
  private:
   void become_follower(Term term, std::optional<NodeId> leader);
@@ -81,6 +82,7 @@ class Raft {
   std::vector<Index> matches_;
   Index commit_;
   Index applied_;
+  std::uint64_t dropped_ = 0;
 };
 
 }  // namespace rme::consensus

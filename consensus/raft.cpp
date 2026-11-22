@@ -37,7 +37,11 @@ void Raft::tick() {
 }
 
 void Raft::step(const Message& message) {
-  RME_ASSERT(message.to == config_.id);
+  if (message.to != config_.id || message.from == config_.id ||
+      std::ranges::find(config_.members, message.from) == config_.members.end()) {
+    ++dropped_;
+    return;
+  }
   if (message.term > term_) {
     const bool from_leader = std::holds_alternative<AppendRequest>(message.body);
     become_follower(message.term, from_leader ? std::optional(message.from) : std::nullopt);
