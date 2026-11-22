@@ -17,14 +17,16 @@ namespace rme::consensus {
 
 class Cluster {
  public:
-  explicit Cluster(std::uint32_t size, std::uint64_t seed = 1)
+  explicit Cluster(std::uint32_t size, std::uint64_t seed = 1, std::size_t max_entries = 64)
       : storage_(size), applied_(size), group_(size, 0) {
     for (std::uint32_t i = 1; i <= size; ++i) {
       members_.emplace_back(i);
     }
     for (const NodeId id : members_) {
-      configs_.push_back(
-          RaftConfig{.id = id, .members = members_, .seed = seed * 1000 + id.value()});
+      configs_.push_back(RaftConfig{.id = id,
+                                    .members = members_,
+                                    .seed = seed * 1000 + id.value(),
+                                    .max_entries_per_append = max_entries});
       nodes_.emplace_back(configs_.back());
     }
   }
@@ -38,8 +40,9 @@ class Cluster {
   }
 
   // Replaces a node's durable state with the given term and entry terms, then restarts it.
-  void load(std::uint32_t id, std::uint64_t term, std::initializer_list<std::uint64_t> log_terms) {
+  void load(std::uint32_t id, std::uint64_t term, const std::vector<std::uint64_t>& log_terms) {
     std::vector<Entry> entries;
+    entries.reserve(log_terms.size());
     for (const std::uint64_t entry_term : log_terms) {
       entries.push_back(
           Entry{Term(entry_term), Index(entries.size() + 1), EntryType::kCommand, {}});
@@ -71,29 +74,35 @@ class Cluster {
   }
 
   void deliver() {
-    while (true) {
-      Outbox outbox{this, {}};
-      for (std::size_t i = 0; i < nodes_.size(); ++i) {
-        process_ready(nodes_[i], storage_[i], outbox, applied_[i]);
+    while (deliver_round()) {
+    }
+  }
+
+  // Processes every node's Ready once and delivers that batch; replies wait for the next round.
+  bool deliver_round() {
+    Outbox outbox{this, {}};
+    for (std::size_t i = 0; i < nodes_.size(); ++i) {
+      process_ready(nodes_[i], storage_[i], outbox, applied_[i]);
+    }
+    const std::vector<Message> batch = std::move(outbox.messages);
+    for (const Message& message : batch) {
+      if (const auto* response = std::get_if<AppendResponse>(&message.body);
+          response != nullptr && !response->success) {
+        ++rejections_;
       }
-      const std::vector<Message> batch = std::move(outbox.messages);
-      if (batch.empty()) {
-        return;
-      }
-      for (const Message& message : batch) {
-        if (const auto* response = std::get_if<AppendResponse>(&message.body);
-            response != nullptr && !response->success) {
-          ++rejections_;
-        }
-        node(message.to.value()).step(message);
-      }
+      node(message.to.value()).step(message);
+    }
+    return !batch.empty();
+  }
+
+  void start_campaign(std::uint32_t id) {
+    while (node(id).role() == Role::kFollower) {
+      node(id).tick();
     }
   }
 
   void campaign(std::uint32_t id) {
-    while (node(id).role() == Role::kFollower) {
-      node(id).tick();
-    }
+    start_campaign(id);
     deliver();
   }
 
