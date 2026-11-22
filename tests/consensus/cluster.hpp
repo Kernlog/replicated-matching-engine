@@ -8,20 +8,37 @@
 #include <utility>
 #include <vector>
 
+#include "consensus/node.hpp"
 #include "consensus/raft.hpp"
+#include "tests/consensus/memory_storage.hpp"
 
 namespace rme::consensus {
 
 class Cluster {
  public:
-  explicit Cluster(std::uint32_t size, std::uint64_t seed = 1) : group_(size, 0) {
+  explicit Cluster(std::uint32_t size, std::uint64_t seed = 1)
+      : storage_(size), applied_(size), group_(size, 0) {
     for (std::uint32_t i = 1; i <= size; ++i) {
       members_.emplace_back(i);
     }
     for (const NodeId id : members_) {
-      nodes_.emplace_back(
+      configs_.push_back(
           RaftConfig{.id = id, .members = members_, .seed = seed * 1000 + id.value()});
+      nodes_.emplace_back(configs_.back());
     }
+  }
+
+  // Drops all volatile state and rebuilds the node from what it synced.
+  void restart(std::uint32_t id) {
+    const MemoryStorage& disk = storage_.at(id - 1);
+    applied_.at(id - 1).entries.clear();
+    configs_.at(id - 1).seed += 7;
+    nodes_.at(id - 1) = Raft(configs_.at(id - 1), disk.state(), disk.entries());
+  }
+
+  [[nodiscard]] const MemoryStorage& storage(std::uint32_t id) const { return storage_.at(id - 1); }
+  [[nodiscard]] const std::vector<Entry>& applied(std::uint32_t id) const {
+    return applied_.at(id - 1).entries;
   }
 
   Raft& node(std::uint32_t id) { return nodes_.at(id - 1); }
@@ -35,17 +52,11 @@ class Cluster {
 
   void deliver() {
     while (true) {
-      std::vector<Message> batch;
-      for (Raft& raft : nodes_) {
-        if (!raft.has_ready()) {
-          continue;
-        }
-        for (Message& message : raft.ready().messages) {
-          if (connected(message.from, message.to)) {
-            batch.push_back(std::move(message));
-          }
-        }
+      Outbox outbox{this, {}};
+      for (std::size_t i = 0; i < nodes_.size(); ++i) {
+        process_ready(nodes_[i], storage_[i], outbox, applied_[i]);
       }
+      const std::vector<Message> batch = std::move(outbox.messages);
       if (batch.empty()) {
         return;
       }
@@ -98,12 +109,32 @@ class Cluster {
   }
 
  private:
+  struct Outbox {
+    Cluster* cluster;
+    std::vector<Message> messages;
+
+    void send(Message&& message) {
+      if (cluster->connected(message.from, message.to)) {
+        messages.push_back(std::move(message));
+      }
+    }
+  };
+
+  struct Applied {
+    std::vector<Entry> entries;
+
+    void apply(const Entry& entry) { entries.push_back(entry); }
+  };
+
   [[nodiscard]] bool connected(NodeId from, NodeId to) const {
     return group_.at(from.value() - 1) == group_.at(to.value() - 1);
   }
 
   std::vector<NodeId> members_;
+  std::vector<RaftConfig> configs_;
   std::vector<Raft> nodes_;
+  std::vector<MemoryStorage> storage_;
+  std::vector<Applied> applied_;
   std::vector<int> group_;
 };
 
