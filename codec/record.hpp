@@ -82,28 +82,24 @@ constexpr CommandRecord to_record(const engine::Replace& c) noexcept {
           .qty = c.qty.value()};
 }
 
-constexpr std::uint32_t checksum(CommandRecord record) noexcept {
+constexpr CommandRecord to_record(const engine::Command& command) {
+  return std::visit([](const auto& c) { return to_record(c); }, command);
+}
+
+constexpr std::uint32_t checksum(CommandRecord record, std::uint32_t seed = 0) noexcept {
   record.crc = 0;
-  return crc32c(std::bit_cast<RecordBytes>(record));
+  return crc32c(std::bit_cast<RecordBytes>(record), seed);
 }
 
-}  // namespace detail
-
-[[nodiscard]] constexpr RecordBytes encode(const engine::Command& command) {
-  CommandRecord record = std::visit([](const auto& c) { return detail::to_record(c); }, command);
-  record.crc = detail::checksum(record);
-  return std::bit_cast<RecordBytes>(record);
-}
-
-[[nodiscard]] constexpr std::optional<engine::Command> decode(
-    std::span<const std::byte> bytes) noexcept {
-  if (bytes.size() != kRecordSize) {
-    return std::nullopt;
-  }
-  RecordBytes raw{};
+template <std::size_t N>
+constexpr std::array<std::byte, N> copied(std::span<const std::byte> bytes) noexcept {
+  std::array<std::byte, N> raw{};
   std::ranges::copy(bytes, raw.begin());
-  const auto r = std::bit_cast<CommandRecord>(raw);
-  if (r.version != kRecordVersion || r.crc != detail::checksum(r)) {
+  return raw;
+}
+
+constexpr std::optional<engine::Command> to_command(const CommandRecord& r) noexcept {
+  if (r.version != kRecordVersion) {
     return std::nullopt;
   }
   const OrderId id(r.id);
@@ -131,6 +127,26 @@ constexpr std::uint32_t checksum(CommandRecord record) noexcept {
       break;
   }
   return std::nullopt;
+}
+
+}  // namespace detail
+
+[[nodiscard]] constexpr RecordBytes encode(const engine::Command& command) {
+  CommandRecord record = detail::to_record(command);
+  record.crc = detail::checksum(record);
+  return std::bit_cast<RecordBytes>(record);
+}
+
+[[nodiscard]] constexpr std::optional<engine::Command> decode(
+    std::span<const std::byte> bytes) noexcept {
+  if (bytes.size() != kRecordSize) {
+    return std::nullopt;
+  }
+  const auto record = std::bit_cast<CommandRecord>(detail::copied<kRecordSize>(bytes));
+  if (record.crc != detail::checksum(record)) {
+    return std::nullopt;
+  }
+  return detail::to_command(record);
 }
 
 }  // namespace rme::codec
