@@ -40,6 +40,7 @@ void Replica::apply(std::uint64_t log_index, std::span<const std::byte> batch,
                     std::vector<Outcome>& out) {
   RME_ASSERT(log_index > applied_index_ && log_index < kMaxLogIndex);
   applied_index_ = log_index;
+  expire(log_index);
   const std::size_t count = batch.size() / codec::kClientRecordSize;
   if (count > kMaxBatchCommands) {
     return;
@@ -48,19 +49,35 @@ void Replica::apply(std::uint64_t log_index, std::span<const std::byte> batch,
   std::uint64_t position = 0;
   static_cast<void>(codec::for_each_client_command(batch, [&](const ClientCommand& command) {
     out.push_back(command.client == kRegisterClient ? open_session(log_index, position)
-                                                    : execute(command));
+                                                    : execute(log_index, command));
     ++position;
   }));
 }
 
+void Replica::expire(std::uint64_t log_index) {
+  while (!by_last_index_.empty() &&
+         log_index - by_last_index_.begin()->first > config_.session_ttl_entries) {
+    sessions_.erase(by_last_index_.begin()->second);
+    by_last_index_.erase(by_last_index_.begin());
+  }
+}
+
+void Replica::touch(std::uint64_t id, Session& session, std::uint64_t log_index) {
+  by_last_index_.erase({session.last_index, id});
+  session.last_index = log_index;
+  by_last_index_.emplace(log_index, id);
+}
+
 Outcome Replica::open_session(std::uint64_t log_index, std::uint64_t position) {
   const std::uint64_t id = (log_index << kPositionBits) | position;
-  const bool inserted = sessions_.emplace(id, Session{}).second;
+  const bool inserted =
+      sessions_.emplace(id, Session{.last_seq = 0, .last_index = log_index, .events = {}}).second;
   RME_ASSERT(inserted);
+  by_last_index_.emplace(log_index, id);
   return {.client = id, .result = SessionResult::kRegistered, .events = {}};
 }
 
-Outcome Replica::execute(const ClientCommand& command) {
+Outcome Replica::execute(std::uint64_t log_index, const ClientCommand& command) {
   Outcome outcome{.client = command.client,
                   .seq = command.seq,
                   .result = SessionResult::kUnknownSession,
@@ -73,6 +90,7 @@ Outcome Replica::execute(const ClientCommand& command) {
   outcome.result = classify(command.seq, session.last_seq);
   if (outcome.result == SessionResult::kApplied) {
     session.last_seq = command.seq;
+    touch(command.client, session, log_index);
     session.events.clear();
     book_.apply(command.command, session.events);
   }
@@ -89,6 +107,7 @@ std::uint64_t Replica::hash() const {
   for (const auto& [id, session] : sessions_) {
     hasher.add(id);
     hasher.add(session.last_seq);
+    hasher.add(session.last_index);
     hasher.add(session.events.size());
     for (const Event& event : session.events) {
       for (const std::uint64_t w : to_words(event)) {
@@ -103,7 +122,7 @@ std::vector<std::byte> Replica::snapshot() const {
   const std::vector<std::byte> book = engine::snapshot(book_);
   std::size_t size = 2 * sizeof(std::uint64_t) + book.size();
   for (const auto& entry : sessions_) {
-    size += 3 * sizeof(std::uint64_t) + entry.second.events.size() * kEventSize;
+    size += 4 * sizeof(std::uint64_t) + entry.second.events.size() * kEventSize;
   }
   wire::Writer out(kReplicaVersion, size);
   out.u64(applied_index_);
@@ -111,6 +130,7 @@ std::vector<std::byte> Replica::snapshot() const {
   for (const auto& [id, session] : sessions_) {
     out.u64(id);
     out.u64(session.last_seq);
+    out.u64(session.last_index);
     out.u64(session.events.size());
     for (const Event& event : session.events) {
       for (const std::uint64_t w : to_words(event)) {
@@ -129,11 +149,15 @@ std::optional<Replica> Replica::restore(std::span<const std::byte> bytes, Replic
   std::map<std::uint64_t, Session> sessions;
   for (std::uint64_t i = 0; i < session_count && in.ok(); ++i) {
     const std::uint64_t id = in.u64();
-    Session session{.last_seq = in.u64(), .events = {}};
+    const std::uint64_t last_seq = in.u64();
+    const std::uint64_t last_index = in.u64();
+    Session session{.last_seq = last_seq, .last_index = last_index, .events = {}};
     const std::uint64_t event_count = in.u64();
+    const std::uint64_t registered_at = id >> kPositionBits;
     if (event_count > in.remaining() / kEventSize ||
-        (!sessions.empty() && id <= sessions.rbegin()->first) || id >> kPositionBits == 0 ||
-        id >> kPositionBits > applied_index) {
+        (!sessions.empty() && id <= sessions.rbegin()->first) || registered_at == 0 ||
+        registered_at > last_index || last_index > applied_index ||
+        applied_index - last_index > config.session_ttl_entries) {
       return std::nullopt;
     }
     session.events.reserve(event_count);
@@ -159,6 +183,9 @@ std::optional<Replica> Replica::restore(std::span<const std::byte> bytes, Replic
   }
   Replica replica(config, std::move(*book));
   replica.sessions_ = std::move(sessions);
+  for (const auto& [id, session] : replica.sessions_) {
+    replica.by_last_index_.emplace(session.last_index, id);
+  }
   replica.applied_index_ = applied_index;
   return replica;
 }

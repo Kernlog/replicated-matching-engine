@@ -4,7 +4,9 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <span>
+#include <utility>
 #include <vector>
 
 #include "engine/client_command.hpp"
@@ -38,6 +40,7 @@ struct ReplicaConfig {
 
 struct Session {
   std::uint64_t last_seq = 0;
+  std::uint64_t last_index = 0;
   std::vector<Event> events;
 
   friend bool operator==(const Session&, const Session&) = default;
@@ -60,12 +63,15 @@ class Replica {
  private:
   Replica(ReplicaConfig config, OrderBook book);
 
+  void expire(std::uint64_t log_index);
+  void touch(std::uint64_t id, Session& session, std::uint64_t log_index);
   [[nodiscard]] Outcome open_session(std::uint64_t log_index, std::uint64_t position);
-  [[nodiscard]] Outcome execute(const ClientCommand& command);
+  [[nodiscard]] Outcome execute(std::uint64_t log_index, const ClientCommand& command);
 
   ReplicaConfig config_;
   OrderBook book_;
   std::map<std::uint64_t, Session> sessions_;
+  std::set<std::pair<std::uint64_t, std::uint64_t>> by_last_index_;
   std::uint64_t applied_index_ = 0;
 };
 
