@@ -1,5 +1,7 @@
 #include "sim/cluster.hpp"
 
+#include <algorithm>
+#include <string>
 #include <utility>
 #include <variant>
 
@@ -58,10 +60,39 @@ Cluster::Cluster(const SimConfig& config)
 }
 
 SimStats Cluster::run() {
+  step_until(config_.duration, false);
+  if (checker_.ok() && config_.heal_window > Time(0)) {
+    heal();
+    const Time healed_at = queue_.now();
+    if (step_until(config_.duration + config_.heal_window, true)) {
+      stats_.recovered_after = queue_.now() - healed_at;
+    } else if (checker_.ok()) {
+      stats_.violations.push_back("liveness: no node applied past index " +
+                                  std::to_string(heal_mark_.value()) + " within " +
+                                  std::to_string(config_.heal_window.value()) + " after heal");
+    }
+  }
+  check_logs();
+  const auto& found = checker_.violations();
+  stats_.violations.insert(stats_.violations.begin(), found.begin(), found.end());
+  stats_.network = network_.stats();
+  for (const EngineMachine& machine : machines_) {
+    trace_.add(machine.applied().value());
+    trace_.add(machine.book_hash());
+    trace_.add(machine.events_hash());
+  }
+  stats_.trace_hash = trace_.digest();
+  return stats_;
+}
+
+bool Cluster::step_until(Time end, bool stop_on_recovery) {
   while (checker_.ok()) {
-    const auto event = queue_.pop_until(config_.duration);
+    if (stop_on_recovery && recovered()) {
+      return true;
+    }
+    const auto event = queue_.pop_until(end);
     if (!event) {
-      break;
+      return false;
     }
     if (const auto* tick = std::get_if<Tick>(&*event)) {
       on_tick(*tick);
@@ -72,16 +103,26 @@ SimStats Cluster::run() {
       check_logs();
     }
   }
-  check_logs();
-  stats_.violations = checker_.violations();
-  stats_.network = network_.stats();
-  for (const EngineMachine& machine : machines_) {
-    trace_.add(machine.applied().value());
-    trace_.add(machine.book_hash());
-    trace_.add(machine.events_hash());
+  return false;
+}
+
+void Cluster::heal() {
+  healed_ = true;
+  network_.heal();
+  config_.faults.crash_one_in = 0;
+  config_.faults.sync_crash_one_in = 0;
+  for (std::size_t i = 0; i < nodes_.size(); ++i) {
+    heal_mark_ = std::max(heal_mark_, nodes_[i].log().last_index());
+    heal_mark_ = std::max(heal_mark_, consensus::Index(disks_[i].entries().size()));
+    if (!up_[i]) {
+      restart(i);
+    }
   }
-  stats_.trace_hash = trace_.digest();
-  return stats_;
+}
+
+bool Cluster::recovered() const {
+  return std::ranges::all_of(
+      machines_, [&](const EngineMachine& machine) { return machine.applied() > heal_mark_; });
 }
 
 void Cluster::on_tick(const Tick& tick) {
@@ -98,9 +139,15 @@ void Cluster::on_tick(const Tick& tick) {
     return;
   }
   nodes_[i].tick();
-  if (nodes_[i].role() == consensus::Role::kLeader && queue_.now() < config_.workload.stop_at &&
-      rng_.below(1000) < config_.workload.propose_per_mille) {
-    propose(i);
+  if (nodes_[i].role() == consensus::Role::kLeader) {
+    if (healed_ && !recovered()) {
+      if (nodes_[i].propose(codec::encode(workload_.next()))) {
+        ++stats_.proposed;
+      }
+    } else if (queue_.now() < config_.workload.stop_at &&
+               rng_.below(1000) < config_.workload.propose_per_mille) {
+      propose(i);
+    }
   }
   process(i);
 }

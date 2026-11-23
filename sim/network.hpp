@@ -46,6 +46,8 @@ class Network {
           std::uint64_t seed);
 
   void send(consensus::Message message);
+  // Ends every fault: no loss, delay spikes, duplication, reordering or partitions from now on.
+  void heal();
 
   [[nodiscard]] bool connected(consensus::NodeId a, consensus::NodeId b) const;
   [[nodiscard]] const NetworkStats& stats() const noexcept { return stats_; }
