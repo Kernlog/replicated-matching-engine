@@ -6,3 +6,5 @@ rme_add_test(engine_test
 if(NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize")
   rme_add_test(engine_alloc_test SOURCES alloc_test.cpp LIBS rme_engine rme_testing)
 endif()
+
+rme_add_test(replica_test SOURCES replica_test.cpp LIBS rme_replica rme_testing)
