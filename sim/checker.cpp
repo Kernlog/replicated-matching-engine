@@ -133,6 +133,43 @@ void Checker::check_log_matching(const std::vector<const consensus::RaftLog*>& l
   }
 }
 
+void Checker::on_outcomes(consensus::Index index, std::span<const engine::Outcome> outcomes) {
+  for (const engine::Outcome& outcome : outcomes) {
+    if (outcome.result != engine::SessionResult::kApplied) {
+      continue;
+    }
+    const auto [it, inserted] = took_effect_.try_emplace({outcome.client, outcome.seq}, index);
+    if (!inserted && it->second != index) {
+      fail("exactly-once: session " + std::to_string(outcome.client) + " seq " +
+           std::to_string(outcome.seq) + " took effect at index " +
+           std::to_string(it->second.value()) + " and" + at(index));
+    }
+  }
+}
+
+void Checker::check_acked(const std::vector<std::pair<std::uint64_t, std::uint64_t>>& acked,
+                          const std::vector<const consensus::RaftLog*>& logs) {
+  for (const auto& [session, seq] : acked) {
+    const auto it = took_effect_.find({session, seq});
+    if (it == took_effect_.end()) {
+      fail("durability: acked session " + std::to_string(session) + " seq " + std::to_string(seq) +
+           " never took effect");
+      return;
+    }
+    const consensus::Index index = it->second;
+    const consensus::Term term = ledger_.at(index.value() - 1).term;
+    const auto holders = std::ranges::count_if(logs, [&](const consensus::RaftLog* log) {
+      return index <= log->snapshot_index() || log->matches(index, term);
+    });
+    if (static_cast<std::size_t>(holders) * 2 <= logs.size()) {
+      fail("durability: acked session " + std::to_string(session) + " seq " + std::to_string(seq) +
+           " is held by only " + std::to_string(holders) + " of " + std::to_string(logs.size()) +
+           " replicas" + at(index));
+      return;
+    }
+  }
+}
+
 void Checker::fail(std::string what) {
   if (violations_.size() < kMaxViolations) {
     violations_.push_back(std::move(what));

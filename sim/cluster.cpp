@@ -36,6 +36,7 @@ void Cluster::Applier::apply(const consensus::Entry& entry) const {
   }
   machine->apply(entry);
   checker->on_applied(node, entry, machine->state_hash());
+  checker->on_outcomes(entry.index, machine->last_outcomes());
   if (leader) {
     for (const engine::Outcome& outcome : machine->last_outcomes()) {
       clients->on_outcome(outcome);
@@ -95,6 +96,14 @@ SimStats Cluster::run() {
     }
   }
   check_logs();
+  if (checker_.ok() && stats_.violations.empty()) {
+    std::vector<const consensus::RaftLog*> logs;
+    logs.reserve(nodes_.size());
+    for (const consensus::Raft& node : nodes_) {
+      logs.push_back(&node.log());
+    }
+    checker_.check_acked(clients_.acked(), logs);
+  }
   const auto& found = checker_.violations();
   stats_.violations.insert(stats_.violations.begin(), found.begin(), found.end());
   stats_.network = network_.stats();
