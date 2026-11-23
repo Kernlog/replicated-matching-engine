@@ -56,6 +56,31 @@ jobs:
           merge-multiple: true
       - run: grep -q book_hash replay-clang.txt && diff replay-clang.txt replay-gcc.txt && cat replay-clang.txt
 
+  sim:
+    runs-on: ubuntu-24.04
+    env:
+      CXX: clang++-18
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: clang-sim
+      - run: cmake --preset release
+      - run: cmake --build --preset release --target sim
+      - name: 500 swarm seeds, twice
+        shell: bash
+        run: |
+          status=0
+          for run in first second; do
+            seq 0 3 | xargs -P 4 -I{} sh -c \
+              "build/release/tools/sim --seeds \$(( {} * 125 + 1 ))..\$(( {} * 125 + 125 )) > $run-{}.txt" || status=1
+          done
+          cat first-*.txt | grep -A8 ' FAIL$' || true
+          cat first-*.txt | grep '^seeds='
+          cmp <(cat first-*.txt) <(cat second-*.txt) || { echo "same seeds produced different traces"; status=1; }
+          exit $status
+
   asan:
     name: asan-ubsan
     runs-on: ubuntu-24.04
