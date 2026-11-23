@@ -1,15 +1,24 @@
 #include "engine/replica.hpp"
 
+#include <utility>
+
 #include "codec/batch.hpp"
 #include "core/assert.hpp"
+#include "core/hash.hpp"
+#include "engine/book_hash.hpp"
+#include "engine/event_words.hpp"
+#include "engine/snapshot.hpp"
+#include "engine/wire.hpp"
 
 namespace rme::engine {
 
 namespace {
 
+constexpr std::uint32_t kReplicaVersion = 1;
 constexpr std::uint64_t kPositionBits = 20;
 constexpr std::uint64_t kMaxBatchCommands = std::uint64_t{1} << kPositionBits;
 constexpr std::uint64_t kMaxLogIndex = std::uint64_t{1} << (64 - kPositionBits);
+constexpr std::size_t kEventSize = sizeof(EventWords);
 
 SessionResult classify(std::uint64_t seq, std::uint64_t last_seq) noexcept {
   if (seq == last_seq) {
@@ -23,7 +32,9 @@ SessionResult classify(std::uint64_t seq, std::uint64_t last_seq) noexcept {
 
 }  // namespace
 
-Replica::Replica(ReplicaConfig config) : config_(config), book_(config.book) {}
+Replica::Replica(ReplicaConfig config) : Replica(config, OrderBook(config.book)) {}
+
+Replica::Replica(ReplicaConfig config, OrderBook book) : config_(config), book_(std::move(book)) {}
 
 void Replica::apply(std::uint64_t log_index, std::span<const std::byte> batch,
                     std::vector<Outcome>& out) {
@@ -69,6 +80,87 @@ Outcome Replica::execute(const ClientCommand& command) {
     outcome.events = session.events;
   }
   return outcome;
+}
+
+std::uint64_t Replica::hash() const {
+  Hasher hasher;
+  hasher.add(book_hash(book_));
+  hasher.add(sessions_.size());
+  for (const auto& [id, session] : sessions_) {
+    hasher.add(id);
+    hasher.add(session.last_seq);
+    hasher.add(session.events.size());
+    for (const Event& event : session.events) {
+      for (const std::uint64_t w : to_words(event)) {
+        hasher.add(w);
+      }
+    }
+  }
+  return hasher.digest();
+}
+
+std::vector<std::byte> Replica::snapshot() const {
+  const std::vector<std::byte> book = engine::snapshot(book_);
+  std::size_t size = 2 * sizeof(std::uint64_t) + book.size();
+  for (const auto& entry : sessions_) {
+    size += 3 * sizeof(std::uint64_t) + entry.second.events.size() * kEventSize;
+  }
+  wire::Writer out(kReplicaVersion, size);
+  out.u64(applied_index_);
+  out.u64(sessions_.size());
+  for (const auto& [id, session] : sessions_) {
+    out.u64(id);
+    out.u64(session.last_seq);
+    out.u64(session.events.size());
+    for (const Event& event : session.events) {
+      for (const std::uint64_t w : to_words(event)) {
+        out.u64(w);
+      }
+    }
+  }
+  out.bytes(book);
+  return std::move(out).seal();
+}
+
+std::optional<Replica> Replica::restore(std::span<const std::byte> bytes, ReplicaConfig config) {
+  wire::Reader in(bytes, kReplicaVersion);
+  const std::uint64_t applied_index = in.u64();
+  const std::uint64_t session_count = in.u64();
+  std::map<std::uint64_t, Session> sessions;
+  for (std::uint64_t i = 0; i < session_count && in.ok(); ++i) {
+    const std::uint64_t id = in.u64();
+    Session session{.last_seq = in.u64(), .events = {}};
+    const std::uint64_t event_count = in.u64();
+    if (event_count > in.remaining() / kEventSize ||
+        (!sessions.empty() && id <= sessions.rbegin()->first) || id >> kPositionBits == 0 ||
+        id >> kPositionBits > applied_index) {
+      return std::nullopt;
+    }
+    session.events.reserve(event_count);
+    for (std::uint64_t e = 0; e < event_count; ++e) {
+      EventWords words{};
+      for (std::uint64_t& w : words) {
+        w = in.u64();
+      }
+      const std::optional<Event> event = from_words(words);
+      if (!event) {
+        return std::nullopt;
+      }
+      session.events.push_back(*event);
+    }
+    sessions.emplace_hint(sessions.end(), id, std::move(session));
+  }
+  if (!in.ok() || applied_index >= kMaxLogIndex) {
+    return std::nullopt;
+  }
+  std::optional<OrderBook> book = engine::restore(in.take_rest(), config.book);
+  if (!book) {
+    return std::nullopt;
+  }
+  Replica replica(config, std::move(*book));
+  replica.sessions_ = std::move(sessions);
+  replica.applied_index_ = applied_index;
+  return replica;
 }
 
 }  // namespace rme::engine

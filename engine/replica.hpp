@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -48,10 +49,17 @@ class Replica {
 
   void apply(std::uint64_t log_index, std::span<const std::byte> batch, std::vector<Outcome>& out);
 
+  [[nodiscard]] std::uint64_t hash() const;
+  [[nodiscard]] std::vector<std::byte> snapshot() const;
+  [[nodiscard]] static std::optional<Replica> restore(std::span<const std::byte> bytes,
+                                                      ReplicaConfig config = {});
+
   [[nodiscard]] std::uint64_t applied_index() const noexcept { return applied_index_; }
   [[nodiscard]] const OrderBook& book() const noexcept { return book_; }
 
  private:
+  Replica(ReplicaConfig config, OrderBook book);
+
   [[nodiscard]] Outcome open_session(std::uint64_t log_index, std::uint64_t position);
   [[nodiscard]] Outcome execute(const ClientCommand& command);
 
