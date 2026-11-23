@@ -1,0 +1,70 @@
+name: sim-nightly
+
+on:
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  VCPKG_COMMIT: 93ad765c7b66ab9ce97469ec23a90b15c3a14ee5
+  VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+  VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-cache
+
+jobs:
+  seeds:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    env:
+      CXX: clang++-18
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: clang-sim
+      - run: cmake --preset release
+      - run: cmake --build --preset release --target sim
+      - name: 12,500 swarm seeds
+        shell: bash
+        run: |
+          base=$(( ${{ matrix.shard }} * 12500 ))
+          seq 0 3 | xargs -P 4 -I{} sh -c \
+            "build/release/tools/sim --seeds \$(( $base + {} * 3125 + 1 ))..\$(( $base + {} * 3125 + 3125 )) > part-{}.txt" || true
+          cat part-*.txt | grep -A8 ' FAIL$' > failures.txt || true
+          cat part-*.txt | grep '^seeds='
+          [ ! -s failures.txt ]
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: failures-${{ matrix.shard }}
+          path: failures.txt
+
+  report:
+    needs: seeds
+    if: failure()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: failures-*
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "Nightly sim run ${{ github.run_id }} on \`${{ github.sha }}\` found failing seeds."
+            echo "Reproduce with \`sim --seeds <n> --verbose\`."
+            echo
+            echo '```'
+            head -c 60000 failures.txt
+            echo '```'
+          } > body.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "sim: nightly seeds failed ($(date -u +%F))" --body-file body.md
