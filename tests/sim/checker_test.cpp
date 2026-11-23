@@ -122,5 +122,51 @@ TEST(CheckerTest, DivergentUncommittedSuffixesAreAllowed) {
   EXPECT_TRUE(checker.ok());
 }
 
+engine::Outcome applied(std::uint64_t session, std::uint64_t seq) {
+  engine::Outcome outcome;
+  outcome.client = session;
+  outcome.seq = seq;
+  outcome.result = engine::SessionResult::kApplied;
+  return outcome;
+}
+
+TEST(CheckerTest, CommandTakingEffectTwice) {
+  Checker checker(3);
+  const std::vector<engine::Outcome> once = {applied(7, 1)};
+  checker.on_outcomes(Index(4), once);
+  checker.on_outcomes(Index(4), once);
+  EXPECT_TRUE(checker.ok());
+  checker.on_outcomes(Index(9), once);
+  expect_violation(checker, "exactly-once");
+}
+
+TEST(CheckerTest, DuplicatesAreNotSecondEffects) {
+  Checker checker(3);
+  checker.on_outcomes(Index(4), std::vector{applied(7, 1)});
+  engine::Outcome duplicate = applied(7, 1);
+  duplicate.result = engine::SessionResult::kDuplicate;
+  checker.on_outcomes(Index(9), std::vector{duplicate});
+  EXPECT_TRUE(checker.ok());
+}
+
+TEST(CheckerTest, AckedCommandHeldByAMajorityIsDurable) {
+  Checker checker(3);
+  const RaftLog full = log_of({1, 1});
+  const RaftLog empty = log_of({});
+  checker.on_leader_commit(Term(1), Index(2), full);
+  checker.on_outcomes(Index(2), std::vector{applied(7, 1)});
+  checker.check_acked({{7, 1}}, {&full, &full, &empty});
+  EXPECT_TRUE(checker.ok());
+  checker.check_acked({{7, 1}}, {&full, &empty, &empty});
+  expect_violation(checker, "durability");
+}
+
+TEST(CheckerTest, AckedCommandThatNeverTookEffect) {
+  Checker checker(3);
+  const RaftLog full = log_of({1});
+  checker.check_acked({{7, 1}}, {&full, &full, &full});
+  expect_violation(checker, "never took effect");
+}
+
 }  // namespace
 }  // namespace rme::sim

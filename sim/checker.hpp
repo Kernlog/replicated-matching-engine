@@ -3,11 +3,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "consensus/raft_log.hpp"
 #include "consensus/types.hpp"
+#include "engine/replica.hpp"
 
 namespace rme::sim {
 
@@ -25,6 +28,12 @@ class Checker {
   void on_restart(consensus::NodeId node);
   void on_applied(consensus::NodeId node, const consensus::Entry& entry, std::uint64_t state_hash);
   void check_log_matching(const std::vector<const consensus::RaftLog*>& logs);
+  // Exactly-once (I7): a (session, seq) takes effect at one log index only, on every replica.
+  void on_outcomes(consensus::Index index, std::span<const engine::Outcome> outcomes);
+  // Durability (I6): every acknowledged (session, seq) took effect, and a majority still holds
+  // that entry with its committed term (in the log or under a snapshot).
+  void check_acked(const std::vector<std::pair<std::uint64_t, std::uint64_t>>& acked,
+                   const std::vector<const consensus::RaftLog*>& logs);
 
   [[nodiscard]] bool ok() const noexcept { return violations_.empty(); }
   [[nodiscard]] const std::vector<std::string>& violations() const noexcept { return violations_; }
@@ -45,6 +54,7 @@ class Checker {
   std::vector<Committed> ledger_;
   std::vector<consensus::Index> commit_floor_;
   std::vector<std::string> violations_;
+  std::map<std::pair<std::uint64_t, std::uint64_t>, consensus::Index> took_effect_;
 };
 
 [[nodiscard]] std::uint64_t entry_digest(const consensus::Entry& entry);
