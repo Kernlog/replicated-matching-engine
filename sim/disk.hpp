@@ -22,6 +22,7 @@ class Disk {
   explicit Disk(std::uint64_t seed) : rng_(seed) {}
 
   void save(const consensus::HardState& state);
+  void save_snapshot(const consensus::Snapshot& snapshot);
   void append(std::span<const consensus::Entry> entries);
   void sync();
   void crash(Crash mode);
@@ -38,11 +39,20 @@ class Disk {
   [[nodiscard]] const std::vector<consensus::Entry>& entries() const noexcept {
     return durable_.entries;
   }
-  [[nodiscard]] bool dirty() const noexcept { return state_dirty_ || dirty_from_.has_value(); }
+  [[nodiscard]] const std::optional<consensus::Snapshot>& snapshot() const noexcept {
+    return durable_.snapshot;
+  }
+  // The durable entries after the snapshot point, as a restart reads them.
+  [[nodiscard]] std::vector<consensus::Entry> log() const;
+  [[nodiscard]] bool dirty() const noexcept {
+    return state_dirty_ || snapshot_dirty_ || dirty_from_.has_value();
+  }
 
  private:
+  // Entries keep absolute positions; compacted ones remain as placeholders below the snapshot.
   struct Image {
     consensus::HardState state;
+    std::optional<consensus::Snapshot> snapshot;
     std::vector<consensus::Entry> entries;
   };
 
@@ -54,6 +64,7 @@ class Disk {
   Image durable_;
   std::vector<std::uint64_t> sums_;
   bool state_dirty_ = false;
+  bool snapshot_dirty_ = false;
   std::optional<std::size_t> dirty_from_;
   std::optional<Crash> armed_;
   bool crashed_ = false;

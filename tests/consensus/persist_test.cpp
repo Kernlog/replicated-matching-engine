@@ -31,6 +31,7 @@ struct Recorder {
 
   void save(const HardState& /*state*/) { events.emplace_back("save"); }
   void append(std::span<const Entry> /*entries*/) { events.emplace_back("append"); }
+  void save_snapshot(const Snapshot& /*snapshot*/) { events.emplace_back("snapshot"); }
   void sync() { events.emplace_back("sync"); }
   void send(Message&& message) {
     events.emplace_back(label(message));

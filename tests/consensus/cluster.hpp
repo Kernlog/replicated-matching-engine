@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <initializer_list>
 #include <optional>
 #include <utility>
@@ -12,6 +13,7 @@
 
 #include "consensus/node.hpp"
 #include "consensus/raft.hpp"
+#include "core/hash.hpp"
 #include "tests/consensus/memory_storage.hpp"
 
 namespace rme::consensus {
@@ -53,9 +55,22 @@ class Cluster {
   // Drops all volatile state and rebuilds the node from what it synced.
   void restart(std::uint32_t id) {
     const MemoryStorage& disk = storage_.at(id - 1);
-    applied_.at(id - 1).entries.clear();
+    applied_.at(id - 1).restore(disk.snapshot());
     configs_.at(id - 1).seed += 7;
-    nodes_.at(id - 1) = Raft(configs_.at(id - 1), disk.state(), disk.entries());
+    nodes_.at(id - 1) = Raft(configs_.at(id - 1), disk.state(), disk.log(), disk.snapshot());
+  }
+
+  // Snapshots the node's state machine at its applied index and compacts its log behind it.
+  void compact(std::uint32_t id) {
+    consensus::compact(node(id), storage_.at(id - 1), applied_.at(id - 1).image());
+  }
+
+  // Digest of everything the node has applied, including what a snapshot stands in for.
+  [[nodiscard]] std::uint64_t applied_digest(std::uint32_t id) const {
+    return applied_.at(id - 1).digest.digest();
+  }
+  [[nodiscard]] std::uint64_t applied_count(std::uint32_t id) const {
+    return applied_.at(id - 1).count;
   }
 
   // Replaces a node's durable state with the given term and entry terms, then restarts it.
@@ -164,7 +179,7 @@ class Cluster {
   }
 
   [[nodiscard]] std::vector<Entry> log_of(std::uint32_t id) {
-    const auto entries = node(id).log().slice(Index(1), SIZE_MAX);
+    const auto entries = node(id).log().slice(node(id).log().snapshot_index() + Index(1), SIZE_MAX);
     return {entries.begin(), entries.end()};
   }
 
@@ -207,8 +222,44 @@ class Cluster {
 
   struct Applied {
     std::vector<Entry> entries;
+    Hasher digest;
+    std::uint64_t count = 0;
 
-    void apply(const Entry& entry) { entries.push_back(entry); }
+    void apply(const Entry& entry) {
+      entries.push_back(entry);
+      digest.add(entry_digest(entry));
+      ++count;
+    }
+
+    [[nodiscard]] std::vector<std::byte> image() const {
+      std::vector<std::byte> out(2 * sizeof(std::uint64_t));
+      const std::array words{digest.digest(), count};
+      std::memcpy(out.data(), words.data(), out.size());
+      return out;
+    }
+
+    void restore(const std::optional<Snapshot>& snapshot) {
+      entries.clear();
+      digest = Hasher{};
+      count = 0;
+      if (snapshot) {
+        std::array<std::uint64_t, 2> words{};
+        std::memcpy(words.data(), snapshot->data.data(), snapshot->data.size());
+        digest = Hasher(words[0]);
+        count = words[1];
+      }
+    }
+
+    static std::uint64_t entry_digest(const Entry& entry) {
+      Hasher hasher;
+      hasher.add(entry.term.value());
+      hasher.add(entry.index.value());
+      hasher.add(entry.data.size());
+      for (const std::byte byte : entry.data) {
+        hasher.add(static_cast<std::uint64_t>(byte));
+      }
+      return hasher.digest();
+    }
   };
 
   [[nodiscard]] bool connected(NodeId from, NodeId to) const {

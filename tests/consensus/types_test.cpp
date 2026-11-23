@@ -11,12 +11,14 @@ namespace {
 
 struct FullStorage {
   void save(const HardState& /*state*/) {}
+  void save_snapshot(const Snapshot& /*snapshot*/) {}
   void append(std::span<const Entry> /*entries*/) {}
   void sync() {}
 };
 
 struct NoSyncStorage {
   void save(const HardState& /*state*/) {}
+  void save_snapshot(const Snapshot& /*snapshot*/) {}
   void append(std::span<const Entry> /*entries*/) {}
 };
 

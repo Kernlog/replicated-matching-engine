@@ -32,10 +32,37 @@ void Disk::save(const consensus::HardState& state) {
   state_dirty_ = true;
 }
 
+void Disk::save_snapshot(const consensus::Snapshot& snapshot) {
+  const std::size_t at = snapshot.index.value();
+  if (written_.entries.size() < at || written_.entries[at - 1].term != snapshot.term) {
+    const std::size_t keep = std::min(written_.entries.size(), at);
+    written_.entries.resize(at, consensus::Entry{});
+    for (std::size_t i = keep; i < at; ++i) {
+      written_.entries[i].index = consensus::Index(i + 1);
+    }
+    dirty_from_ = std::min(dirty_from_.value_or(keep), keep);
+  }
+  written_.snapshot = snapshot;
+  snapshot_dirty_ = true;
+}
+
+std::vector<consensus::Entry> Disk::log() const {
+  const std::size_t from = durable_.snapshot ? durable_.snapshot->index.value() : 0;
+  const auto begin = durable_.entries.begin() +
+                     static_cast<std::ptrdiff_t>(std::min(from, durable_.entries.size()));
+  return {begin, durable_.entries.end()};
+}
+
 void Disk::append(std::span<const consensus::Entry> entries) {
   RME_ASSERT(!entries.empty());
   const auto from = static_cast<std::size_t>(entries.front().index.value() - 1);
-  RME_ASSERT(from <= written_.entries.size());
+  const std::size_t compacted = written_.snapshot ? written_.snapshot->index.value() : 0;
+  RME_ASSERT(from <= std::max(written_.entries.size(), compacted));
+  for (std::size_t i = written_.entries.size(); i < from; ++i) {
+    consensus::Entry placeholder;
+    placeholder.index = consensus::Index(i + 1);
+    written_.entries.push_back(std::move(placeholder));
+  }
   written_.entries.resize(from);
   written_.entries.insert(written_.entries.end(), entries.begin(), entries.end());
   dirty_from_ = std::min(dirty_from_.value_or(from), from);
@@ -49,9 +76,11 @@ void Disk::sync() {
     return;
   }
   durable_.state = written_.state;
+  durable_.snapshot = written_.snapshot;
   const std::size_t from = dirty_from_.value_or(written_.entries.size());
   persist(from, std::span(written_.entries).subspan(from));
   state_dirty_ = false;
+  snapshot_dirty_ = false;
   dirty_from_.reset();
 }
 
@@ -61,18 +90,24 @@ void Disk::crash(Crash mode) {
   }
   written_ = durable_;
   state_dirty_ = false;
+  snapshot_dirty_ = false;
   dirty_from_.reset();
 }
 
 void Disk::tear() {
   const std::size_t from = dirty_from_.value_or(written_.entries.size());
-  const std::size_t writes = (state_dirty_ ? 1U : 0U) + (written_.entries.size() - from);
+  const std::size_t writes =
+      (state_dirty_ ? 1U : 0U) + (snapshot_dirty_ ? 1U : 0U) + (written_.entries.size() - from);
   if (writes == 0) {
     return;
   }
   std::size_t kept = rng_.below(writes);
   if (kept > 0 && state_dirty_) {
     durable_.state = written_.state;
+    --kept;
+  }
+  if (kept > 0 && snapshot_dirty_) {
+    durable_.snapshot = written_.snapshot;
     --kept;
   }
   if (kept > 0) {
