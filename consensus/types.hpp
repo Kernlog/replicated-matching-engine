@@ -42,6 +42,15 @@ struct HardState {
   friend bool operator==(const HardState&, const HardState&) = default;
 };
 
+// State machine image at index (term is the log term there); the log keeps only what follows.
+struct Snapshot {
+  Index index;
+  Term term;
+  std::vector<std::byte> data;
+
+  friend bool operator==(const Snapshot&, const Snapshot&) = default;
+};
+
 struct VoteRequest {
   Index last_index;
   Term last_term;

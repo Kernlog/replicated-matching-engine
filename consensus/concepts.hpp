@@ -7,11 +7,15 @@
 
 namespace rme::consensus {
 
-// append replaces every stored entry at or after entries.front().index. sync makes every earlier
-// save and append durable together, so a crash never keeps entries newer than the saved term.
+// append replaces every stored entry at or after entries.front().index. save_snapshot replaces
+// everything up to the snapshot index, and later entries too unless the stored log agrees with the
+// snapshot's term there. sync makes every earlier save, save_snapshot and append durable together,
+// so a crash never keeps entries newer than the saved term.
 template <typename S>
-concept Storage = requires(S& storage, const HardState& state, std::span<const Entry> entries) {
+concept Storage = requires(S& storage, const HardState& state, const Snapshot& snapshot,
+                           std::span<const Entry> entries) {
   storage.save(state);
+  storage.save_snapshot(snapshot);
   storage.append(entries);
   storage.sync();
 };

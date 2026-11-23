@@ -44,4 +44,12 @@ void process_ready(Raft& raft, S& storage, T& transport, M& machine) {
   }
 }
 
+// Replaces the applied log prefix with the state machine image taken at raft.applied() and makes
+// the snapshot durable.
+template <Storage S>
+void compact(Raft& raft, S& storage, std::vector<std::byte> image) {
+  storage.save_snapshot(raft.compact(std::move(image)));
+  storage.sync();
+}
+
 }  // namespace rme::consensus

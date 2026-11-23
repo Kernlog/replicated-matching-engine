@@ -10,13 +10,18 @@
 
 namespace rme::consensus {
 
-Raft::Raft(RaftConfig config, HardState state, std::vector<Entry> log)
+Raft::Raft(RaftConfig config, HardState state, std::vector<Entry> log,
+           std::optional<Snapshot> snapshot)
     : config_(std::move(config)),
       rng_(config_.seed),
-      log_(std::move(log)),
+      log_(std::move(log), snapshot ? snapshot->index : Index(0),
+           snapshot ? snapshot->term : Term(0)),
       term_(state.term),
       vote_(state.vote),
-      saved_(state) {
+      saved_(state),
+      snapshot_(std::move(snapshot)) {
+  commit_ = log_.snapshot_index();
+  applied_ = log_.snapshot_index();
   RME_ASSERT(std::ranges::find(config_.members, config_.id) != config_.members.end());
   RME_ASSERT(config_.election_ticks > config_.heartbeat_ticks && config_.heartbeat_ticks > 0);
   persisted_ = log_.last_index();
@@ -124,6 +129,13 @@ void Raft::flush_proposals() {
 bool Raft::has_ready() const noexcept {
   return hard_state() != saved_ || !log_.unstable().empty() || !outbox_.empty() ||
          !pending_.empty() || commit_ > applied_;
+}
+
+const Snapshot& Raft::compact(std::vector<std::byte> data) {
+  RME_ASSERT(applied_ > log_.snapshot_index());
+  log_.compact(applied_);
+  snapshot_ = Snapshot{applied_, log_.snapshot_term(), std::move(data)};
+  return *snapshot_;
 }
 
 void Raft::persisted(Index index) {
@@ -357,7 +369,8 @@ void Raft::on(const Message& message, const VoteResponse& response) {
 void Raft::on(const Message& message, const AppendRequest& request) {
   RME_ASSERT(role_ != Role::kLeader);
   become_follower(term_, message.from);
-  if (!log_.matches(request.prev_index, request.prev_term)) {
+  if (request.prev_index > log_.snapshot_index() &&
+      !log_.matches(request.prev_index, request.prev_term)) {
     AppendResponse reject;
     if (request.prev_index > log_.last_index()) {
       reject.conflict_index = log_.last_index() + Index(1);
