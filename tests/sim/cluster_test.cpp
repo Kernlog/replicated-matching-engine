@@ -17,14 +17,15 @@ TEST(ClusterTest, FaultFreeReplicasConvergeOnTheSameBook) {
   config.faults.crash_one_in = 0;
   Cluster cluster(config);
   const SimStats stats = cluster.run();
-  EXPECT_GT(stats.proposed, 500U);
+  EXPECT_GT(stats.clients.acked, 300U);
   EXPECT_EQ(stats.crashes, 0U);
   for (std::size_t i = 0; i < cluster.size(); ++i) {
     EXPECT_EQ(cluster.machine(i).applied(), cluster.machine(0).applied()) << i;
     EXPECT_EQ(cluster.machine(i).book_hash(), cluster.machine(0).book_hash()) << i;
     EXPECT_EQ(cluster.machine(i).events_hash(), cluster.machine(0).events_hash()) << i;
   }
-  EXPECT_EQ(cluster.machine(0).commands(), stats.proposed);
+  EXPECT_EQ(cluster.machine(0).commands(), stats.clients.acked);
+  EXPECT_EQ(stats.clients.retries, 0U);
 }
 
 TEST(ClusterTest, CrashesInsideSyncRecover) {
@@ -78,6 +79,33 @@ TEST(ClusterTest, ReportsLivenessFailureWhenTheWindowIsTooShort) {
   const SimStats stats = Cluster(config).run();
   ASSERT_FALSE(stats.violations.empty());
   EXPECT_NE(stats.violations.front().find("liveness"), std::string::npos);
+}
+
+TEST(ClusterTest, WipedNodesRejoinThroughRecovery) {
+  for (std::uint64_t seed = 1; seed <= 10; ++seed) {
+    SimConfig config;
+    config.seed = seed;
+    config.duration = Time(60'000);
+    config.faults.crash_one_in = 0;
+    config.faults.wipe_one_in = 400;
+    config.workload.snapshot_every = 64;
+    const SimStats stats = Cluster(config).run();
+    EXPECT_TRUE(stats.violations.empty()) << "seed " << seed << ": " << stats.violations.front();
+    EXPECT_GT(stats.wipes, 3U) << seed;
+    EXPECT_GT(stats.snapshots, 3U) << seed;
+    EXPECT_GT(stats.recovered_after, Time(0)) << seed;
+  }
+}
+
+TEST(ClusterTest, ClientsRetryThroughLeaderChanges) {
+  SimConfig config;
+  config.duration = Time(60'000);
+  config.network.partitions = true;
+  config.network.drop = 50;
+  const SimStats stats = Cluster(config).run();
+  EXPECT_TRUE(stats.violations.empty()) << stats.violations.front();
+  EXPECT_GT(stats.clients.retries, 0U);
+  EXPECT_GT(stats.clients.acked, 100U);
 }
 
 }  // namespace
