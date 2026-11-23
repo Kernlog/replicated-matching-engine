@@ -472,6 +472,10 @@ void Raft::on(const Message& message, const AppendResponse& response) {
     replicate(peer);
     return;
   }
+  if (response.conflict_index == Index(0)) {
+    // A rejection without a hint answers a stale-term request and says nothing about this log.
+    return;
+  }
   Index hinted = response.conflict_index;
   if (response.conflict_term != Term(0)) {
     if (const auto last = log_.last_index_of(response.conflict_term)) {

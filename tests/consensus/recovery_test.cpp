@@ -94,5 +94,19 @@ TEST(RecoveryTest, StaleCandidateCannotWinWithAWipedVoter) {
   }
 }
 
+TEST(RecoveryTest, HintlessRejectionLeavesProgressAlone) {
+  Raft raft(
+      RaftConfig{.id = NodeId(1), .members = {NodeId(1), NodeId(2), NodeId(3)}, .pre_vote = false});
+  while (raft.role() != Role::kCandidate) {
+    raft.tick();
+  }
+  raft.step({NodeId(2), NodeId(1), raft.term(), VoteResponse{true, false}});
+  ASSERT_EQ(raft.role(), Role::kLeader);
+  raft.ready();
+  raft.step({NodeId(2), NodeId(1), raft.term(), AppendResponse{}});
+  EXPECT_TRUE(raft.ready().messages.empty());
+  EXPECT_EQ(raft.role(), Role::kLeader);
+}
+
 }  // namespace
 }  // namespace rme::consensus
