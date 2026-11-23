@@ -97,6 +97,7 @@ class Cluster {
     Checker* checker = nullptr;
     consensus::NodeId node;
     void apply(const consensus::Entry& entry) const;
+    void restore(const consensus::Snapshot& snapshot) const;
   };
 
   void on_tick(const Tick& tick);

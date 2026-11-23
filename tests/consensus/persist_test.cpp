@@ -38,6 +38,7 @@ struct Recorder {
     sent.push_back(std::move(message));
   }
   void apply(const Entry& /*entry*/) { events.emplace_back("apply"); }
+  void restore(const Snapshot& /*snapshot*/) { events.emplace_back("restore"); }
 };
 
 TEST(PersistTest, VoteIsSyncedBeforeTheGrantIsSent) {

@@ -28,6 +28,7 @@ struct Wire {
 
 struct Machine {
   void apply(const Entry& /*entry*/) {}
+  void restore(const Snapshot& /*snapshot*/) {}
 };
 
 static_assert(Storage<FullStorage>);
