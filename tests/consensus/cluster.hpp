@@ -60,6 +60,16 @@ class Cluster {
     nodes_.at(id - 1) = Raft(configs_.at(id - 1), disk.state(), disk.log(), disk.snapshot());
   }
 
+  // Loses every durable byte of the node and brings it back in lost-state recovery.
+  void wipe(std::uint32_t id) {
+    storage_.at(id - 1) = MemoryStorage{};
+    applied_.at(id - 1).restore(std::nullopt);
+    RaftConfig config = configs_.at(id - 1);
+    config.lost_state = true;
+    config.seed += 13;
+    nodes_.at(id - 1) = Raft(config);
+  }
+
   // Snapshots the node's state machine at its applied index and compacts its log behind it.
   void compact(std::uint32_t id) {
     consensus::compact(node(id), storage_.at(id - 1), applied_.at(id - 1).image());
