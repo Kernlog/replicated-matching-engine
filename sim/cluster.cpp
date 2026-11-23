@@ -52,7 +52,15 @@ Cluster::Cluster(const SimConfig& config)
   nodes_.reserve(members.size());
   disks_.reserve(members.size());
   for (const consensus::NodeId id : members) {
-    configs_.push_back(consensus::RaftConfig{.id = id, .members = members, .seed = rng_.next()});
+    configs_.push_back(
+        consensus::RaftConfig{.id = id,
+                              .members = members,
+                              .election_ticks = config.raft.election_ticks,
+                              .seed = rng_.next(),
+                              .max_entries_per_append = config.raft.max_entries_per_append,
+                              .max_inflight = config.raft.max_inflight,
+                              .pre_vote = config.raft.pre_vote,
+                              .check_quorum = config.raft.check_quorum});
     nodes_.emplace_back(configs_.back());
     disks_.emplace_back(rng_.next());
     clock_.start(id, Time(1 + rng_.below(config.tick_interval.value())));

@@ -34,6 +34,15 @@ struct WorkloadConfig {
   Time stop_at = Time(~std::uint64_t{0});
 };
 
+// Raft knobs the swarm varies; production defaults otherwise.
+struct RaftKnobs {
+  std::uint32_t election_ticks = 10;
+  std::size_t max_entries_per_append = 64;
+  std::uint32_t max_inflight = 8;
+  bool pre_vote = true;
+  bool check_quorum = true;
+};
+
 struct SimConfig {
   std::uint64_t seed = 1;
   std::uint32_t nodes = 3;
@@ -45,6 +54,7 @@ struct SimConfig {
   NetworkConfig network;
   FaultConfig faults;
   WorkloadConfig workload;
+  RaftKnobs raft;
 };
 
 struct SimStats {
