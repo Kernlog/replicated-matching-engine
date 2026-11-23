@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <iterator>
 #include <optional>
 #include <set>
 #include <span>
@@ -55,30 +56,46 @@ std::uint64_t registered(Replica& replica, std::uint64_t index) {
   return out.empty() ? 0 : out.front().client;
 }
 
-Replica round_trip(const Replica& replica) {
-  std::optional<Replica> copy = Replica::restore(replica.snapshot());
+constexpr ReplicaConfig ttl(std::uint64_t entries) {
+  ReplicaConfig config;
+  config.session_ttl_entries = entries;
+  return config;
+}
+
+constexpr std::uint64_t kFakeClientBit = std::uint64_t{1} << 40U;
+
+Replica round_trip(const Replica& replica, ReplicaConfig config = {}) {
+  std::optional<Replica> copy = Replica::restore(replica.snapshot(), config);
   if (!copy) {
     ADD_FAILURE() << "valid snapshot rejected";
-    return Replica{};
+    return Replica{config};
   }
   return std::move(*copy);
 }
 
+std::size_t expired_in(const std::vector<Outcome>& outcomes) {
+  std::size_t count = 0;
+  for (const Outcome& outcome : outcomes) {
+    if (outcome.result == SessionResult::kUnknownSession && outcome.client < kFakeClientBit) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+// Builds a log of client batches with retries, stale, out-of-order and unknown sessions mixed
+// in, replacing clients whose sessions expire.
 class Workload {
  public:
-  explicit Workload(std::uint64_t seed) : rng_(seed), stream_(seed) {}
+  Workload(std::uint64_t seed, ReplicaConfig config)
+      : rng_(seed), stream_(seed), scratch_(config) {}
 
   std::vector<Bytes> log(std::size_t entries) {
     std::vector<Bytes> out;
-    out.reserve(entries + 1);
-    out.push_back(batch({codec::encode_register(), codec::encode_register(),
-                         codec::encode_register(), codec::encode_register()}));
-    Replica scratch;
-    for (const Outcome& outcome : apply(scratch, 1, out.front())) {
-      clients_.push_back({outcome.client, 1});
-    }
-    for (std::size_t i = 0; i < entries; ++i) {
+    out.reserve(entries);
+    for (std::uint64_t index = 1; index <= entries; ++index) {
       out.push_back(entry());
+      learn(apply(scratch_, index, out.back()));
     }
     return out;
   }
@@ -94,7 +111,7 @@ class Workload {
       return Bytes(7);
     }
     Bytes out;
-    const std::uint64_t count = rng_.below(6);
+    const std::uint64_t count = clients_.empty() ? 2 : rng_.below(6);
     out.reserve(count * codec::kClientRecordSize);
     for (std::uint64_t i = 0; i < count; ++i) {
       const codec::ClientRecordBytes record = next_record();
@@ -104,6 +121,9 @@ class Workload {
   }
 
   codec::ClientRecordBytes next_record() {
+    if (clients_.empty() || rng_.chance(1, 50)) {
+      return codec::encode_register();
+    }
     Client& client = clients_[rng_.below(clients_.size())];
     const std::uint64_t roll = rng_.below(100);
     if (roll < 10) {
@@ -116,16 +136,25 @@ class Workload {
       return from(client.id, client.next_seq + 1 + rng_.below(3), Cancel{});
     }
     if (roll < 21) {
-      return from(client.id + (std::uint64_t{1} << 40U), 1, Cancel{});
-    }
-    if (roll < 23) {
-      return codec::encode_register();
+      return from(client.id | kFakeClientBit, 1, Cancel{});
     }
     return from(client.id, client.next_seq++, stream_.next());
   }
 
+  void learn(const std::vector<Outcome>& outcomes) {
+    for (const Outcome& outcome : outcomes) {
+      if (outcome.result == SessionResult::kRegistered) {
+        clients_.push_back({.id = outcome.client, .next_seq = 1});
+      }
+      if (outcome.result == SessionResult::kUnknownSession) {
+        std::erase_if(clients_, [&](const Client& c) { return c.id == outcome.client; });
+      }
+    }
+  }
+
   Rng rng_;
   testing::CommandStream stream_;
+  Replica scratch_;
   std::vector<Client> clients_;
 };
 
@@ -227,32 +256,53 @@ TEST(ReplicaTest, RegistrationIdsAreUniqueAndDeterministic) {
 }
 
 TEST(ReplicaTest, SnapshotRoundTripsHashAndLaterAppliesStayIdentical) {
-  const std::vector<Bytes> log = Workload(21).log(800);
-  for (const std::size_t prefix : std::array<std::size_t, 4>{1, 2, 200, 600}) {
-    Replica original;
-    for (std::size_t i = 0; i < prefix; ++i) {
-      apply(original, i + 1, log[i]);
-    }
-    Replica restored = round_trip(original);
-    ASSERT_EQ(restored.hash(), original.hash()) << prefix;
-    EXPECT_EQ(restored.applied_index(), original.applied_index());
-    EXPECT_EQ(restored.snapshot(), original.snapshot());
-    std::size_t applied = 0;
-    for (std::size_t i = prefix; i < log.size(); ++i) {
-      const std::vector<Outcome> expected = apply(original, i + 1, log[i]);
-      ASSERT_EQ(apply(restored, i + 1, log[i]), expected) << prefix << " entry " << i;
-      for (const Outcome& outcome : expected) {
-        applied += outcome.result == SessionResult::kApplied ? 1 : 0;
+  for (const ReplicaConfig config : {ReplicaConfig{}, ttl(6)}) {
+    const std::vector<Bytes> log = Workload(21, config).log(800);
+    for (const std::size_t prefix : std::array<std::size_t, 4>{1, 2, 200, 600}) {
+      Replica original(config);
+      for (std::size_t i = 0; i < prefix; ++i) {
+        apply(original, i + 1, log[i]);
       }
+      Replica restored = round_trip(original, config);
+      ASSERT_EQ(restored.hash(), original.hash()) << prefix;
+      EXPECT_EQ(restored.applied_index(), original.applied_index());
+      EXPECT_EQ(restored.snapshot(), original.snapshot());
+      std::size_t applied = 0;
+      for (std::size_t i = prefix; i < log.size(); ++i) {
+        const std::vector<Outcome> expected = apply(original, i + 1, log[i]);
+        ASSERT_EQ(apply(restored, i + 1, log[i]), expected) << prefix << " entry " << i;
+        for (const Outcome& outcome : expected) {
+          applied += outcome.result == SessionResult::kApplied ? 1 : 0;
+        }
+      }
+      EXPECT_GT(applied, log.size() - prefix);
+      EXPECT_EQ(restored.hash(), original.hash()) << prefix;
+      EXPECT_EQ(book_hash(restored.book()), book_hash(original.book()));
     }
-    EXPECT_GT(applied, log.size() - prefix);
-    EXPECT_EQ(restored.hash(), original.hash()) << prefix;
-    EXPECT_EQ(book_hash(restored.book()), book_hash(original.book()));
   }
 }
 
+TEST(ReplicaTest, IdenticalLogsExpireIdentically) {
+  const ReplicaConfig config = ttl(4);
+  const std::vector<Bytes> log = Workload(33, config).log(1'500);
+  Replica a(config);
+  Replica b(config);
+  Replica never_expires;
+  std::size_t expired = 0;
+  for (std::size_t i = 0; i < log.size(); ++i) {
+    const std::vector<Outcome> left = apply(a, i + 1, log[i]);
+    ASSERT_EQ(apply(b, i + 1, log[i]), left) << i;
+    ASSERT_EQ(a.hash(), b.hash()) << i;
+    expired += expired_in(left);
+    apply(never_expires, i + 1, log[i]);
+  }
+  EXPECT_GT(expired, 20U);
+  EXPECT_EQ(expired_in(apply(never_expires, log.size() + 1, {})), 0U);
+  EXPECT_NE(never_expires.hash(), a.hash());
+}
+
 TEST(ReplicaTest, RejectsCorruptAndTruncatedSnapshots) {
-  const std::vector<Bytes> log = Workload(4).log(40);
+  const std::vector<Bytes> log = Workload(4, {}).log(40);
   Replica replica;
   for (std::size_t i = 0; i < log.size(); ++i) {
     apply(replica, i + 1, log[i]);
