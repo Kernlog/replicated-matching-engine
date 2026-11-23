@@ -16,7 +16,7 @@ struct Replication {
 };
 
 Replication replicate(std::uint32_t max_inflight, int entries) {
-  Cluster cluster(3, {.max_entries = 16, .max_inflight = max_inflight});
+  Cluster cluster(3, {.max_entries = 16, .max_inflight = max_inflight, .max_uncommitted = 4096});
   EXPECT_TRUE(cluster.run_until([&] { return cluster.leader_id() != 0; }));
   const std::uint32_t leader = cluster.leader_id();
   cluster.tick_all();
