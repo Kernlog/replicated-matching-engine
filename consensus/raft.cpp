@@ -22,6 +22,10 @@ Raft::Raft(RaftConfig config, HardState state, std::vector<Entry> log,
       snapshot_(std::move(snapshot)) {
   commit_ = log_.snapshot_index();
   applied_ = log_.snapshot_index();
+  if (config_.lost_state) {
+    recovering_ = true;
+    peer_terms_.resize(config_.members.size());
+  }
   RME_ASSERT(std::ranges::find(config_.members, config_.id) != config_.members.end());
   RME_ASSERT(config_.election_ticks > config_.heartbeat_ticks && config_.heartbeat_ticks > 0);
   persisted_ = log_.last_index();
@@ -41,6 +45,16 @@ void Raft::tick() {
     if (elapsed_ >= config_.heartbeat_ticks) {
       elapsed_ = 0;
       broadcast_heartbeat();
+    }
+    return;
+  }
+  if (recovering_) {
+    if (++probe_elapsed_ >= config_.election_ticks) {
+      probe_elapsed_ = 0;
+      probe_terms();
+    }
+    if (elapsed_ >= timeout_) {
+      reset_election_timer();
     }
     return;
   }
@@ -64,6 +78,9 @@ void Raft::step(const Message& message) {
   const bool pre_vote_request = vote_request != nullptr && vote_request->pre_vote;
   const bool pre_vote_grant =
       vote_response != nullptr && vote_response->pre_vote && vote_response->granted;
+  if (recovering_) {
+    note_term(message.from, pre_vote_grant ? term_ : message.term);
+  }
   if (message.term > term_ && vote_request != nullptr && !pre_vote_request &&
       config_.check_quorum && in_leader_lease()) {
     return;
@@ -344,7 +361,45 @@ bool Raft::is_quorum(std::size_t count) const noexcept {
   return count * 2 > config_.members.size();
 }
 
+// A node that lost its durable state stays out of elections until it has (1) learned the current
+// term of every other member, which bounds every term it could have voted in (the candidate it
+// voted for persisted that term), and (2) caught up to a leader at or above those terms whose
+// commit index points at an entry of its own term: by the current-term rule every entry committed
+// before sits at or below that point, so the node now holds all of them. Until then it follows a
+// leader but never votes or campaigns. Rejected pre-vote probes report each peer's term.
+void Raft::probe_terms() {
+  for (const NodeId peer : config_.members) {
+    if (peer != config_.id) {
+      send(peer, VoteRequest{log_.last_index(), log_.last_term(), true}, term_ + Term(1));
+    }
+  }
+}
+
+void Raft::note_term(NodeId peer, Term term) {
+  const auto at = std::ranges::find(config_.members, peer) - config_.members.begin();
+  auto& known = peer_terms_[static_cast<std::size_t>(at)];
+  known = std::max(known.value_or(Term(0)), term);
+}
+
+void Raft::maybe_recover(Index leader_commit) {
+  if (!recovering_ || commit_ < leader_commit) {
+    return;
+  }
+  for (std::size_t i = 0; i < config_.members.size(); ++i) {
+    const std::optional<Term>& known = peer_terms_[i];
+    if (config_.members[i] != config_.id && (!known.has_value() || known.value_or(term_) > term_)) {
+      return;
+    }
+  }
+  recovering_ = false;
+  vote_ = leader_;
+}
+
 void Raft::on(const Message& message, const VoteRequest& request) {
+  if (recovering_) {
+    send(message.from, VoteResponse{false, request.pre_vote}, term_);
+    return;
+  }
   const bool up_to_date =
       request.last_term > log_.last_term() ||
       (request.last_term == log_.last_term() && request.last_index >= log_.last_index());
@@ -362,6 +417,9 @@ void Raft::on(const Message& message, const VoteRequest& request) {
 }
 
 void Raft::on(const Message& message, const VoteResponse& response) {
+  if (recovering_) {
+    return;
+  }
   const Role expected = response.pre_vote ? Role::kPreCandidate : Role::kCandidate;
   if (role_ != expected || !response.granted ||
       std::ranges::find(granted_, message.from) != granted_.end()) {
@@ -396,6 +454,9 @@ void Raft::on(const Message& message, const AppendRequest& request) {
   const Index last_new = log_.merge(request.prev_index, request.entries);
   persisted_ = std::min(persisted_, log_.stable_index());
   commit_ = std::max(commit_, std::min(request.commit, last_new));
+  if (log_.matches(request.commit, message.term)) {
+    maybe_recover(request.commit);
+  }
   send(message.from, AppendResponse{true, last_new, Index(0), Term(0)});
 }
 
@@ -415,11 +476,19 @@ void Raft::on(const Message& message, const AppendResponse& response) {
     replicate(peer);
     return;
   }
+  if (response.conflict_index == Index(0)) {
+    // A rejection without a hint answers a stale-term request and says nothing about this log.
+    return;
+  }
   Index hinted = response.conflict_index;
   if (response.conflict_term != Term(0)) {
     if (const auto last = log_.last_index_of(response.conflict_term)) {
       hinted = *last + Index(1);
     }
+  }
+  if (hinted <= peer.match) {
+    // The follower no longer holds what it acknowledged (it lost its disk), so match is stale.
+    peer.match = hinted - Index(1);
   }
   probe_from(peer, std::max(peer.match + Index(1), std::min(hinted, peer.next - Index(1))));
 }

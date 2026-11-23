@@ -24,6 +24,9 @@ struct RaftConfig {
   std::uint64_t max_uncommitted_entries = 256;
   bool pre_vote = true;
   bool check_quorum = true;
+  // The node restarted without its durable state (disk lost or wiped), so it may have voted in
+  // terms it no longer remembers and lost entries it helped commit.
+  bool lost_state = false;
 };
 
 enum class Role : std::uint8_t { kFollower, kPreCandidate, kCandidate, kLeader };
@@ -58,6 +61,7 @@ class Raft {
   [[nodiscard]] const RaftLog& log() const noexcept { return log_; }
   [[nodiscard]] Index commit() const noexcept { return commit_; }
   [[nodiscard]] Index applied() const noexcept { return applied_; }
+  [[nodiscard]] bool recovering() const noexcept { return recovering_; }
   [[nodiscard]] std::uint64_t dropped() const noexcept { return dropped_; }
 
  private:
@@ -89,6 +93,9 @@ class Raft {
   void send(NodeId to, Body body);
   void send(NodeId to, Body body, Term term);
   [[nodiscard]] bool in_leader_lease() const noexcept;
+  void note_term(NodeId peer, Term term);
+  void probe_terms();
+  void maybe_recover(Index leader_commit);
   [[nodiscard]] bool is_quorum(std::size_t count) const noexcept;
   [[nodiscard]] HardState hard_state() const noexcept { return {term_, vote_}; }
 
@@ -120,6 +127,9 @@ class Raft {
   std::uint64_t dropped_ = 0;
   std::optional<Snapshot> snapshot_;
   std::optional<Snapshot> installed_;
+  bool recovering_ = false;
+  std::uint32_t probe_elapsed_ = 0;
+  std::vector<std::optional<Term>> peer_terms_;
 };
 
 }  // namespace rme::consensus
