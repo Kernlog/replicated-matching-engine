@@ -386,7 +386,8 @@ void Raft::maybe_recover(Index leader_commit) {
     return;
   }
   for (std::size_t i = 0; i < config_.members.size(); ++i) {
-    if (config_.members[i] != config_.id && (!peer_terms_[i] || *peer_terms_[i] > term_)) {
+    const std::optional<Term>& known = peer_terms_[i];
+    if (config_.members[i] != config_.id && (!known.has_value() || known.value_or(term_) > term_)) {
       return;
     }
   }
