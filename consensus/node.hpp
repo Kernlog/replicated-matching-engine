@@ -27,10 +27,13 @@ void process_ready(Raft& raft, S& storage, T& transport, M& machine) {
   if (ready.hard_state) {
     storage.save(*ready.hard_state);
   }
+  if (ready.snapshot) {
+    storage.save_snapshot(*ready.snapshot);
+  }
   if (!ready.entries.empty()) {
     storage.append(ready.entries);
   }
-  if (ready.hard_state || !ready.entries.empty()) {
+  if (ready.hard_state || ready.snapshot || !ready.entries.empty()) {
     storage.sync();
   }
   if (!ready.entries.empty()) {
@@ -38,6 +41,9 @@ void process_ready(Raft& raft, S& storage, T& transport, M& machine) {
   }
   for (Message& message : replies) {
     transport.send(std::move(message));
+  }
+  if (ready.snapshot) {
+    machine.restore(*ready.snapshot);
   }
   for (const Entry& entry : ready.committed) {
     machine.apply(entry);

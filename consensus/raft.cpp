@@ -70,11 +70,13 @@ void Raft::step(const Message& message) {
   }
   if (message.term > term_) {
     if (!pre_vote_request && !pre_vote_grant) {
-      const bool from_leader = std::holds_alternative<AppendRequest>(message.body);
+      const bool from_leader = std::holds_alternative<AppendRequest>(message.body) ||
+                               std::holds_alternative<InstallSnapshot>(message.body);
       become_follower(message.term, from_leader ? std::optional(message.from) : std::nullopt);
     }
   } else if (message.term < term_) {
-    if (std::holds_alternative<AppendRequest>(message.body)) {
+    if (std::holds_alternative<AppendRequest>(message.body) ||
+        std::holds_alternative<InstallSnapshot>(message.body)) {
       send(message.from, AppendResponse{});
     } else if (pre_vote_request) {
       send(message.from, VoteResponse{false, true});
@@ -128,7 +130,7 @@ void Raft::flush_proposals() {
 
 bool Raft::has_ready() const noexcept {
   return hard_state() != saved_ || !log_.unstable().empty() || !outbox_.empty() ||
-         !pending_.empty() || commit_ > applied_;
+         !pending_.empty() || installed_.has_value() || commit_ > applied_;
 }
 
 const Snapshot& Raft::compact(std::vector<std::byte> data) {
@@ -157,6 +159,7 @@ Ready Raft::ready() {
   ready.entries.assign(unstable.begin(), unstable.end());
   log_.mark_stable(log_.last_index());
   ready.messages = std::exchange(outbox_, {});
+  ready.snapshot = std::exchange(installed_, std::nullopt);
   const auto committed = log_.slice(applied_ + Index(1), (commit_ - applied_).value());
   ready.committed.assign(committed.begin(), committed.end());
   applied_ = commit_;
@@ -246,6 +249,10 @@ void Raft::broadcast_heartbeat() {
 // Probing: one AppendEntries outstanding until the follower's position is known. Replicating:
 // next advances optimistically with up to max_inflight batches in flight.
 void Raft::replicate(Progress& peer) {
+  if (peer.next <= log_.snapshot_index() && !peer.probing) {
+    peer.probing = true;
+    peer.probe_sent = false;
+  }
   if (peer.probing) {
     if (!peer.probe_sent) {
       send_entries(peer);
@@ -283,6 +290,11 @@ void Raft::probe_from(Progress& peer, Index next) {
 }
 
 std::size_t Raft::send_entries(const Progress& peer) {
+  if (peer.next <= log_.snapshot_index()) {
+    RME_ASSERT(snapshot_.has_value());
+    send(peer.id, InstallSnapshot{*snapshot_});
+    return 0;
+  }
   const Index prev = peer.next - Index(1);
   const auto entries = log_.slice(peer.next, config_.max_entries_per_append);
   send(peer.id, AppendRequest{prev, log_.term_at(prev).value_or(Term(0)),
@@ -410,6 +422,25 @@ void Raft::on(const Message& message, const AppendResponse& response) {
     }
   }
   probe_from(peer, std::max(peer.match + Index(1), std::min(hinted, peer.next - Index(1))));
+}
+
+// A follower behind the leader's compaction point takes the snapshot in place of the entries it
+// is missing; the reply leaves only after the snapshot is durable.
+void Raft::on(const Message& message, const InstallSnapshot& install) {
+  RME_ASSERT(role_ != Role::kLeader);
+  become_follower(term_, message.from);
+  const Snapshot& snapshot = install.snapshot;
+  if (snapshot.index <= commit_) {
+    send(message.from, AppendResponse{true, commit_, Index(0), Term(0)});
+    return;
+  }
+  log_.install(snapshot.index, snapshot.term);
+  persisted_ = std::max(std::min(persisted_, log_.stable_index()), snapshot.index);
+  commit_ = snapshot.index;
+  applied_ = snapshot.index;
+  snapshot_ = snapshot;
+  installed_ = snapshot;
+  send(message.from, AppendResponse{true, snapshot.index, Index(0), Term(0)});
 }
 
 }  // namespace rme::consensus

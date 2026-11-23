@@ -23,9 +23,13 @@ concept Storage = requires(S& storage, const HardState& state, const Snapshot& s
 template <typename T>
 concept Transport = requires(T& transport, Message message) { transport.send(std::move(message)); };
 
-// commit is volatile: after a restart, entries are applied again from index 1, so the machine
-// must start empty.
+// commit is volatile: after a restart, entries are applied again from the snapshot index (or 1),
+// so the machine must start from that snapshot (or empty). restore replaces the whole state with a
+// snapshot a leader installed.
 template <typename M>
-concept StateMachine = requires(M& machine, const Entry& entry) { machine.apply(entry); };
+concept StateMachine = requires(M& machine, const Entry& entry, const Snapshot& snapshot) {
+  machine.apply(entry);
+  machine.restore(snapshot);
+};
 
 }  // namespace rme::consensus

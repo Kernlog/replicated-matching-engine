@@ -84,7 +84,14 @@ struct AppendResponse {
   friend bool operator==(const AppendResponse&, const AppendResponse&) = default;
 };
 
-using Body = std::variant<VoteRequest, VoteResponse, AppendRequest, AppendResponse>;
+struct InstallSnapshot {
+  Snapshot snapshot;
+
+  friend bool operator==(const InstallSnapshot&, const InstallSnapshot&) = default;
+};
+
+using Body =
+    std::variant<VoteRequest, VoteResponse, AppendRequest, AppendResponse, InstallSnapshot>;
 
 struct Message {
   NodeId from;
@@ -95,15 +102,17 @@ struct Message {
   friend bool operator==(const Message&, const Message&) = default;
 };
 
-// Persist hard_state and entries, then send messages, then apply committed entries.
+// Persist hard_state, snapshot and entries, then send messages, then restore the state machine from
+// the snapshot if there is one, then apply committed entries.
 struct Ready {
   std::optional<HardState> hard_state;
+  std::optional<Snapshot> snapshot;
   std::vector<Entry> entries;
   std::vector<Message> messages;
   std::vector<Entry> committed;
 
   [[nodiscard]] bool empty() const noexcept {
-    return !hard_state && entries.empty() && messages.empty() && committed.empty();
+    return !hard_state && !snapshot && entries.empty() && messages.empty() && committed.empty();
   }
 };
 
