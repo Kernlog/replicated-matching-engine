@@ -238,6 +238,8 @@ class Cluster {
       return out;
     }
 
+    void restore(const Snapshot& snapshot) { restore(std::optional(snapshot)); }
+
     void restore(const std::optional<Snapshot>& snapshot) {
       entries.clear();
       digest = Hasher{};

@@ -96,6 +96,7 @@ class Raft {
   void on(const Message& message, const VoteResponse& response);
   void on(const Message& message, const AppendRequest& request);
   void on(const Message& message, const AppendResponse& response);
+  void on(const Message& message, const InstallSnapshot& install);
 
   RaftConfig config_;
   Rng rng_;
@@ -118,6 +119,7 @@ class Raft {
   Index persisted_;
   std::uint64_t dropped_ = 0;
   std::optional<Snapshot> snapshot_;
+  std::optional<Snapshot> installed_;
 };
 
 }  // namespace rme::consensus

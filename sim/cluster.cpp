@@ -7,6 +7,7 @@
 
 #include "codec/record.hpp"
 #include "consensus/node.hpp"
+#include "core/assert.hpp"
 
 namespace rme::sim {
 
@@ -34,6 +35,10 @@ void Cluster::Applier::apply(const consensus::Entry& entry) const {
     machine->apply(entry);
     checker->on_applied(node, entry, machine->state_hash());
   }
+}
+
+void Cluster::Applier::restore(const consensus::Snapshot& /*snapshot*/) const {
+  RME_ASSERT(disk->crashed() && "the sim does not compact logs yet");
 }
 
 Cluster::Cluster(const SimConfig& config)
