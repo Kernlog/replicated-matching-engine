@@ -21,6 +21,7 @@ struct RaftConfig {
   std::size_t max_entries_per_append = 64;
   std::size_t max_entry_bytes = std::size_t{64} << 10U;
   std::uint32_t max_inflight = 8;
+  std::uint64_t max_uncommitted_entries = 256;
   bool pre_vote = true;
   bool check_quorum = true;
 };
@@ -34,7 +35,9 @@ class Raft {
   void tick();
   void step(const Message& message);
   // Buffers a command on the leader; commands are packed into one entry per Ready, up to
-  // max_entry_bytes. Returns false when this node is not the leader.
+  // max_entry_bytes. Returns false when this node is not the leader, or when the leader already
+  // holds max_uncommitted_entries it cannot commit yet, so overload pushes back on clients instead
+  // of growing the log without bound.
   bool propose(std::span<const std::byte> command);
 
   [[nodiscard]] bool has_ready() const noexcept;

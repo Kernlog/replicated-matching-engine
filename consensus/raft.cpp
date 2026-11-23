@@ -101,6 +101,11 @@ bool Raft::propose(std::span<const std::byte> command) {
   if (role_ != Role::kLeader) {
     return false;
   }
+  const std::uint64_t uncommitted =
+      (log_.last_index() - commit_).value() + (pending_.empty() ? 0 : 1);
+  if (uncommitted >= config_.max_uncommitted_entries) {
+    return false;
+  }
   if (!pending_.empty() && pending_.size() + command.size() > config_.max_entry_bytes) {
     flush_proposals();
   }
