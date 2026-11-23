@@ -363,8 +363,9 @@ bool Raft::is_quorum(std::size_t count) const noexcept {
 
 // A node that lost its durable state stays out of elections until it has (1) learned the current
 // term of every other member, which bounds every term it could have voted in (the candidate it
-// voted for persisted that term), and (2) caught up to the commit index of a leader at or above
-// those terms, so it holds every entry committed before it lost them. Until then it follows a
+// voted for persisted that term), and (2) caught up to a leader at or above those terms whose
+// commit index points at an entry of its own term: by the current-term rule every entry committed
+// before sits at or below that point, so the node now holds all of them. Until then it follows a
 // leader but never votes or campaigns. Rejected pre-vote probes report each peer's term.
 void Raft::probe_terms() {
   for (const NodeId peer : config_.members) {
@@ -452,7 +453,9 @@ void Raft::on(const Message& message, const AppendRequest& request) {
   const Index last_new = log_.merge(request.prev_index, request.entries);
   persisted_ = std::min(persisted_, log_.stable_index());
   commit_ = std::max(commit_, std::min(request.commit, last_new));
-  maybe_recover(request.commit);
+  if (log_.matches(request.commit, message.term)) {
+    maybe_recover(request.commit);
+  }
   send(message.from, AppendResponse{true, last_new, Index(0), Term(0)});
 }
 

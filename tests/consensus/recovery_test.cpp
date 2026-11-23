@@ -94,6 +94,25 @@ TEST(RecoveryTest, StaleCandidateCannotWinWithAWipedVoter) {
   }
 }
 
+// A new leader's commit can still trail entries an earlier leader committed; recovery must wait
+// until the leader's commit point is an entry of its own term, which covers all of them.
+TEST(RecoveryTest, RecoveryWaitsForALeaderCommitInItsOwnTerm) {
+  Raft raft(wiped(1, 3));
+  for (const std::uint32_t peer : {2U, 3U}) {
+    raft.step({NodeId(peer), NodeId(1), Term(5), VoteResponse{false, true}});
+  }
+  const std::vector<Entry> old_entries = {Entry{Term(2), Index(1), EntryType::kCommand, {}},
+                                          Entry{Term(2), Index(2), EntryType::kCommand, {}}};
+  raft.step(
+      {NodeId(2), NodeId(1), Term(5), AppendRequest{Index(0), Term(0), old_entries, Index(2)}});
+  EXPECT_EQ(raft.commit(), Index(2));
+  EXPECT_TRUE(raft.recovering());
+  const std::vector<Entry> noop = {Entry{Term(5), Index(3), EntryType::kNoop, {}}};
+  raft.step({NodeId(2), NodeId(1), Term(5), AppendRequest{Index(2), Term(2), noop, Index(3)}});
+  EXPECT_FALSE(raft.recovering());
+  EXPECT_EQ(raft.ready().hard_state, std::optional(HardState{Term(5), NodeId(2)}));
+}
+
 TEST(RecoveryTest, HintlessRejectionLeavesProgressAlone) {
   Raft raft(
       RaftConfig{.id = NodeId(1), .members = {NodeId(1), NodeId(2), NodeId(3)}, .pre_vote = false});
