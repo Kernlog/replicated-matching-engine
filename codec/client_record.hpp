@@ -42,8 +42,10 @@ constexpr std::uint32_t session_seed(std::uint64_t client, std::uint64_t seq) no
   return std::bit_cast<ClientRecordBytes>(record);
 }
 
-[[nodiscard]] constexpr ClientRecordBytes encode_register() {
-  return encode(engine::ClientCommand{});
+// The nonce comes back in the registration outcome's seq, so a client can tell which new session
+// is its own.
+[[nodiscard]] constexpr ClientRecordBytes encode_register(std::uint64_t nonce = 0) {
+  return encode(engine::ClientCommand{.client = engine::kRegisterClient, .seq = nonce});
 }
 
 [[nodiscard]] constexpr std::optional<engine::ClientCommand> decode_client(
@@ -60,7 +62,8 @@ constexpr std::uint32_t session_seed(std::uint64_t client, std::uint64_t seq) no
     return std::nullopt;
   }
   engine::ClientCommand decoded{.client = r.client, .seq = r.seq, .command = *command};
-  if (r.client == engine::kRegisterClient && decoded != engine::ClientCommand{}) {
+  if (r.client == engine::kRegisterClient &&
+      decoded != engine::ClientCommand{.client = engine::kRegisterClient, .seq = r.seq}) {
     return std::nullopt;
   }
   return decoded;

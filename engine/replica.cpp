@@ -48,7 +48,7 @@ void Replica::apply(std::uint64_t log_index, std::span<const std::byte> batch,
   out.reserve(out.size() + count);
   std::uint64_t position = 0;
   static_cast<void>(codec::for_each_client_command(batch, [&](const ClientCommand& command) {
-    out.push_back(command.client == kRegisterClient ? open_session(log_index, position)
+    out.push_back(command.client == kRegisterClient ? open_session(log_index, position, command.seq)
                                                     : execute(log_index, command));
     ++position;
   }));
@@ -68,13 +68,14 @@ void Replica::touch(std::uint64_t id, Session& session, std::uint64_t log_index)
   by_last_index_.emplace(log_index, id);
 }
 
-Outcome Replica::open_session(std::uint64_t log_index, std::uint64_t position) {
+Outcome Replica::open_session(std::uint64_t log_index, std::uint64_t position,
+                              std::uint64_t nonce) {
   const std::uint64_t id = (log_index << kPositionBits) | position;
   const bool inserted =
       sessions_.emplace(id, Session{.last_seq = 0, .last_index = log_index, .events = {}}).second;
   RME_ASSERT(inserted);
   by_last_index_.emplace(log_index, id);
-  return {.client = id, .result = SessionResult::kRegistered, .events = {}};
+  return {.client = id, .seq = nonce, .result = SessionResult::kRegistered, .events = {}};
 }
 
 Outcome Replica::execute(std::uint64_t log_index, const ClientCommand& command) {

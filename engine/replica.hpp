@@ -65,7 +65,8 @@ class Replica {
 
   void expire(std::uint64_t log_index);
   void touch(std::uint64_t id, Session& session, std::uint64_t log_index);
-  [[nodiscard]] Outcome open_session(std::uint64_t log_index, std::uint64_t position);
+  [[nodiscard]] Outcome open_session(std::uint64_t log_index, std::uint64_t position,
+                                     std::uint64_t nonce);
   [[nodiscard]] Outcome execute(std::uint64_t log_index, const ClientCommand& command);
 
   ReplicaConfig config_;
