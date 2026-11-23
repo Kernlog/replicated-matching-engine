@@ -49,7 +49,11 @@ void Clients::on_outcome(const engine::Outcome& outcome) {
   }
   const auto client = std::ranges::find_if(
       clients_, [&](const Client& c) { return c.session == outcome.client && c.pending; });
-  if (client == clients_.end() || client->pending->seq != outcome.seq) {
+  if (client == clients_.end()) {
+    return;
+  }
+  const std::optional<Pending>& pending = client->pending;
+  if (!pending.has_value() || pending.value_or(Pending{}).seq != outcome.seq) {
     return;
   }
   if (outcome.result == engine::SessionResult::kApplied ||
