@@ -10,27 +10,33 @@
 #include "core/hash.hpp"
 #include "core/rng.hpp"
 #include "sim/checker.hpp"
+#include "sim/clients.hpp"
 #include "sim/clock.hpp"
 #include "sim/disk.hpp"
 #include "sim/engine_machine.hpp"
 #include "sim/event_queue.hpp"
 #include "sim/network.hpp"
-#include "testing/command_stream.hpp"
 
 namespace rme::sim {
 
 // Odds are "one in N" per node tick (crash) or per Ready (crash inside sync); 0 turns a fault off.
 struct FaultConfig {
   std::uint32_t crash_one_in = 3000;
+  // Loses a node's whole disk; it rejoins in lost-state recovery. One node at a time, never while
+  // another is down or still recovering, since a majority of lost disks is unrecoverable.
+  std::uint32_t wipe_one_in = 0;
   std::uint32_t sync_crash_one_in = 0;
   bool torn_writes = true;
   Time min_down = Time(100);
   Time max_down = Time(2000);
 };
 
+// Per leader tick, each idle client issues its next command with propose_per_mille odds.
 struct WorkloadConfig {
   std::uint32_t propose_per_mille = 300;
-  std::uint32_t max_batch = 4;
+  ClientConfig clients;
+  // Every node compacts its log once this many entries are applied past its snapshot; 0 never.
+  std::uint64_t snapshot_every = 256;
   Time stop_at = Time(~std::uint64_t{0});
 };
 
@@ -48,7 +54,7 @@ struct SimConfig {
   std::uint32_t nodes = 3;
   Time tick_interval = Time(10);
   Time duration = Time(100'000);
-  // After duration every fault stops and down nodes restart; every node must then apply an entry
+  // After duration every fault stops and down nodes restart; a majority must then apply an entry
   // past anything that existed before the heal within this window.
   Time heal_window = Time(20'000);
   NetworkConfig network;
@@ -64,6 +70,9 @@ struct SimStats {
   std::uint64_t applied = 0;
   std::uint64_t crashes = 0;
   std::uint64_t sync_crashes = 0;
+  std::uint64_t wipes = 0;
+  std::uint64_t snapshots = 0;
+  ClientStats clients;
   Time recovered_after = Time(0);
   NetworkStats network;
   std::vector<std::string> violations;
@@ -95,7 +104,9 @@ class Cluster {
     EngineMachine* machine = nullptr;
     const Disk* disk = nullptr;
     Checker* checker = nullptr;
+    Clients* clients = nullptr;
     consensus::NodeId node;
+    bool leader = false;
     void apply(const consensus::Entry& entry) const;
     void restore(const consensus::Snapshot& snapshot) const;
   };
@@ -103,6 +114,9 @@ class Cluster {
   void on_tick(const Tick& tick);
   void on_delivery(const consensus::Message& message);
   void propose(std::size_t i);
+  void maybe_compact(std::size_t i);
+  void wipe(std::size_t i);
+  [[nodiscard]] bool can_wipe() const;
   void process(std::size_t i);
   void observe(std::size_t i);
   void check_logs();
@@ -118,13 +132,15 @@ class Cluster {
   EventQueue queue_;
   Clock clock_;
   Network network_;
-  testing::CommandStream workload_;
+  Clients clients_;
+  std::vector<codec::ClientRecordBytes> proposals_;
   std::vector<consensus::RaftConfig> configs_;
   std::vector<consensus::Raft> nodes_;
   std::vector<Disk> disks_;
   std::vector<EngineMachine> machines_;
   std::vector<bool> up_;
   std::vector<Time> down_until_;
+  std::vector<bool> lost_;
   std::vector<consensus::Role> roles_;
   Checker checker_;
   std::uint64_t events_ = 0;

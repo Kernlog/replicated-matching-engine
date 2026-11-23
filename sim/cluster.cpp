@@ -5,7 +5,7 @@
 #include <utility>
 #include <variant>
 
-#include "codec/record.hpp"
+#include "codec/client_record.hpp"
 #include "consensus/node.hpp"
 #include "core/assert.hpp"
 
@@ -31,14 +31,22 @@ void Cluster::Wire::send(consensus::Message&& message) const {
 }
 
 void Cluster::Applier::apply(const consensus::Entry& entry) const {
-  if (!disk->crashed()) {
-    machine->apply(entry);
-    checker->on_applied(node, entry, machine->state_hash());
+  if (disk->crashed()) {
+    return;
+  }
+  machine->apply(entry);
+  checker->on_applied(node, entry, machine->state_hash());
+  if (leader) {
+    for (const engine::Outcome& outcome : machine->last_outcomes()) {
+      clients->on_outcome(outcome);
+    }
   }
 }
 
-void Cluster::Applier::restore(const consensus::Snapshot& /*snapshot*/) const {
-  RME_ASSERT(disk->crashed() && "the sim does not compact logs yet");
+void Cluster::Applier::restore(const consensus::Snapshot& snapshot) const {
+  if (!disk->crashed()) {
+    machine->restore(snapshot);
+  }
 }
 
 Cluster::Cluster(const SimConfig& config)
@@ -46,10 +54,11 @@ Cluster::Cluster(const SimConfig& config)
       rng_(config.seed),
       clock_(queue_, config.tick_interval),
       network_(queue_, config.network, member_ids(config.nodes), rng_.next()),
-      workload_(rng_.next()),
+      clients_(config.workload.clients, rng_.next()),
       machines_(config.nodes),
       up_(config.nodes, true),
       down_until_(config.nodes),
+      lost_(config.nodes, false),
       roles_(config.nodes, consensus::Role::kFollower),
       checker_(config.nodes) {
   const auto members = member_ids(config.nodes);
@@ -89,6 +98,7 @@ SimStats Cluster::run() {
   const auto& found = checker_.violations();
   stats_.violations.insert(stats_.violations.begin(), found.begin(), found.end());
   stats_.network = network_.stats();
+  stats_.clients = clients_.stats();
   for (const EngineMachine& machine : machines_) {
     trace_.add(machine.applied().value());
     trace_.add(machine.book_hash());
@@ -124,6 +134,7 @@ void Cluster::heal() {
   network_.heal();
   config_.faults.crash_one_in = 0;
   config_.faults.sync_crash_one_in = 0;
+  config_.faults.wipe_one_in = 0;
   for (std::size_t i = 0; i < nodes_.size(); ++i) {
     heal_mark_ = std::max(heal_mark_, nodes_[i].log().last_index());
     heal_mark_ = std::max(heal_mark_, consensus::Index(disks_[i].entries().size()));
@@ -133,9 +144,12 @@ void Cluster::heal() {
   }
 }
 
+// Commit progress: a majority has applied an entry past anything that existed at the heal. A
+// follower still replaying a long backlog one entry at a time is allowed to lag.
 bool Cluster::recovered() const {
-  return std::ranges::all_of(
+  const auto past = std::ranges::count_if(
       machines_, [&](const EngineMachine& machine) { return machine.applied() > heal_mark_; });
+  return static_cast<std::size_t>(past) * 2 > machines_.size();
 }
 
 void Cluster::on_tick(const Tick& tick) {
@@ -147,6 +161,10 @@ void Cluster::on_tick(const Tick& tick) {
     }
     return;
   }
+  if (roll(config_.faults.wipe_one_in) && can_wipe()) {
+    wipe(i);
+    return;
+  }
   if (roll(config_.faults.crash_one_in)) {
     crash(i, config_.faults.torn_writes && rng_.chance(1, 2) ? Crash::kTornTail : Crash::kClean);
     return;
@@ -154,11 +172,10 @@ void Cluster::on_tick(const Tick& tick) {
   nodes_[i].tick();
   if (nodes_[i].role() == consensus::Role::kLeader) {
     if (healed_ && !recovered()) {
-      if (nodes_[i].propose(codec::encode(workload_.next()))) {
+      if (nodes_[i].propose(codec::encode_register())) {
         ++stats_.proposed;
       }
-    } else if (queue_.now() < config_.workload.stop_at &&
-               rng_.below(1000) < config_.workload.propose_per_mille) {
+    } else if (queue_.now() < config_.workload.stop_at) {
       propose(i);
     }
   }
@@ -180,12 +197,43 @@ void Cluster::on_delivery(const consensus::Message& message) {
 }
 
 void Cluster::propose(std::size_t i) {
-  const auto batch = 1 + rng_.below(config_.workload.max_batch);
-  for (std::uint64_t k = 0; k < batch; ++k) {
-    if (nodes_[i].propose(codec::encode(workload_.next()))) {
+  proposals_.clear();
+  clients_.collect(queue_.now(), config_.workload.propose_per_mille, proposals_);
+  for (const codec::ClientRecordBytes& record : proposals_) {
+    if (nodes_[i].propose(record)) {
       ++stats_.proposed;
     }
   }
+}
+
+void Cluster::maybe_compact(std::size_t i) {
+  const consensus::Raft& raft = nodes_[i];
+  if (config_.workload.snapshot_every == 0 ||
+      (raft.applied() - raft.log().snapshot_index()).value() < config_.workload.snapshot_every) {
+    return;
+  }
+  consensus::compact(nodes_[i], disks_[i], machines_[i].snapshot());
+  ++stats_.snapshots;
+  if (disks_[i].crashed()) {
+    ++stats_.sync_crashes;
+    crash(i, Crash::kClean);
+  }
+}
+
+bool Cluster::can_wipe() const {
+  for (std::size_t i = 0; i < nodes_.size(); ++i) {
+    if (!up_[i] || lost_[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void Cluster::wipe(std::size_t i) {
+  ++stats_.wipes;
+  disks_[i] = Disk(rng_.next());
+  lost_[i] = true;
+  crash(i, Crash::kClean);
 }
 
 void Cluster::process(std::size_t i) {
@@ -195,7 +243,8 @@ void Cluster::process(std::size_t i) {
   observe(i);
   const std::uint64_t before = machines_[i].applied().value();
   Wire wire{&network_, &disks_[i]};
-  Applier applier{&machines_[i], &disks_[i], &checker_, nodes_[i].id()};
+  Applier applier{&machines_[i], &disks_[i],     &checker_,
+                  &clients_,     nodes_[i].id(), nodes_[i].role() == consensus::Role::kLeader};
   consensus::process_ready(nodes_[i], disks_[i], wire, applier);
   stats_.applied += machines_[i].applied().value() - before;
   if (disks_[i].crashed()) {
@@ -204,6 +253,10 @@ void Cluster::process(std::size_t i) {
     return;
   }
   observe(i);
+  if (lost_[i] && !nodes_[i].recovering()) {
+    lost_[i] = false;
+  }
+  maybe_compact(i);
 }
 
 void Cluster::observe(std::size_t i) {
@@ -244,7 +297,11 @@ void Cluster::restart(std::size_t i) {
   up_[i] = true;
   disks_[i].restarted();
   machines_[i] = EngineMachine{};
+  if (const auto& snapshot = disks_[i].snapshot()) {
+    machines_[i].restore(*snapshot);
+  }
   configs_[i].seed = rng_.next();
+  configs_[i].lost_state = lost_[i];
   nodes_[i] =
       consensus::Raft(configs_[i], disks_[i].state(), disks_[i].log(), disks_[i].snapshot());
   roles_[i] = consensus::Role::kFollower;

@@ -44,7 +44,7 @@ TEST(ClientRecordTest, RejectsEverySingleBitFlip) {
 }
 
 TEST(ClientRecordTest, RegisterRequestIsCanonical) {
-  EXPECT_EQ(decode_client(encode(ClientCommand{.seq = 1})), std::nullopt);
+  EXPECT_EQ(decode_client(encode_register(42)), std::optional(ClientCommand{.seq = 42}));
   EXPECT_EQ(decode_client(encode(ClientCommand{.command = engine::Cancel{OrderId(1)}})),
             std::nullopt);
   const ClientRecordBytes bytes = encode_register();

@@ -40,7 +40,11 @@ SimConfig swarm(std::uint64_t seed) {
   config.faults.min_down = Time(20 + rng.below(200));
   config.faults.max_down = config.faults.min_down + Time(rng.below(3000));
   config.workload.propose_per_mille = static_cast<std::uint32_t>(50 + rng.below(950));
-  config.workload.max_batch = static_cast<std::uint32_t>(1 + rng.below(16));
+  config.workload.clients.count = static_cast<std::uint32_t>(1 + rng.below(24));
+  config.workload.clients.retry_after = Time(100 + rng.below(900));
+  config.workload.snapshot_every = rng.chance(1, 4) ? 0 : 16 + rng.below(512);
+  config.faults.wipe_one_in =
+      rng.chance(1, 3) ? static_cast<std::uint32_t>(2000 + rng.below(20000)) : 0;
   const std::uint64_t floor_ticks =
       std::max<std::uint64_t>(3, (4 * config.network.max_latency.value() + 9) / 10);
   config.raft.election_ticks = static_cast<std::uint32_t>(floor_ticks + rng.below(16));
@@ -61,6 +65,9 @@ std::string describe(const SimConfig& config) {
          " reorder=" + std::to_string(n.reorder) + " partitions=" + (n.partitions ? "on" : "off") +
          " crash=1/" + std::to_string(f.crash_one_in) + " sync_crash=1/" +
          std::to_string(f.sync_crash_one_in) + " torn=" + (f.torn_writes ? "on" : "off") +
+         " wipe=1/" + std::to_string(f.wipe_one_in) +
+         " clients=" + std::to_string(config.workload.clients.count) +
+         " snapshot_every=" + std::to_string(config.workload.snapshot_every) +
          " propose=" + std::to_string(config.workload.propose_per_mille) + "/1000" +
          " election=" + std::to_string(config.raft.election_ticks) +
          " per_append=" + std::to_string(config.raft.max_entries_per_append) +

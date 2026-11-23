@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "codec/crc32c.hpp"
+#include "core/assert.hpp"
 #include "core/hash.hpp"
 
 namespace rme::sim {
@@ -46,7 +47,8 @@ void Checker::on_leader(consensus::NodeId node, consensus::Term term,
   for (std::size_t i = 0; i < ledger_.size(); ++i) {
     const Committed& entry = ledger_[i];
     const consensus::Index index(i + 1);
-    if (entry.committed_in < term && !log.matches(index, entry.term)) {
+    if (entry.committed_in < term && index > log.snapshot_index() &&
+        !log.matches(index, entry.term)) {
       fail("leader completeness: " + node_name(node) + " leads term " +
            std::to_string(term.value()) + " without the entry committed in term " +
            std::to_string(entry.committed_in.value()) + at(index));
@@ -58,13 +60,14 @@ void Checker::on_leader(consensus::NodeId node, consensus::Term term,
 void Checker::on_leader_commit(consensus::Term term, consensus::Index commit,
                                const consensus::RaftLog& log) {
   if (commit.value() <= ledger_.size()) {
-    if (commit > consensus::Index(0) &&
+    if (commit > log.snapshot_index() &&
         ledger_[commit.value() - 1].digest != entry_digest(log.at(commit))) {
       fail("state machine safety: a term " + std::to_string(term.value()) +
            " leader committed a different entry" + at(commit));
     }
     return;
   }
+  RME_ASSERT(ledger_.size() >= log.snapshot_index().value());
   for (consensus::Index index(ledger_.size() + 1); index <= commit; index += consensus::Index(1)) {
     const consensus::Entry& entry = log.at(index);
     ledger_.push_back(Committed{entry.term, entry_digest(entry), term, 0, false});
@@ -112,8 +115,10 @@ void Checker::check_log_matching(const std::vector<const consensus::RaftLog*>& l
       const consensus::RaftLog& left = *logs[a];
       const consensus::RaftLog& right = *logs[b];
       const consensus::Index shared = std::min(left.last_index(), right.last_index());
-      const consensus::Index floor(
-          ledger_.size() > kVerifiedWindow ? ledger_.size() - kVerifiedWindow : 0);
+      const consensus::Index floor =
+          std::max({consensus::Index(
+                        ledger_.size() > kVerifiedWindow ? ledger_.size() - kVerifiedWindow : 0),
+                    left.snapshot_index(), right.snapshot_index()});
       bool matched = false;
       for (consensus::Index index = shared; index > floor; index -= consensus::Index(1)) {
         const bool same_term = left.at(index).term == right.at(index).term;
