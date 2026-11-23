@@ -21,6 +21,7 @@ struct ClusterOptions {
   std::size_t max_entries = 64;
   std::size_t max_entry_bytes = 1;
   std::uint32_t max_inflight = 8;
+  std::uint64_t max_uncommitted = 256;
   bool pre_vote = true;
   bool check_quorum = true;
 };
@@ -42,6 +43,7 @@ class Cluster {
                                     .max_entries_per_append = options.max_entries,
                                     .max_entry_bytes = options.max_entry_bytes,
                                     .max_inflight = options.max_inflight,
+                                    .max_uncommitted_entries = options.max_uncommitted,
                                     .pre_vote = options.pre_vote,
                                     .check_quorum = options.check_quorum});
       nodes_.emplace_back(configs_.back());

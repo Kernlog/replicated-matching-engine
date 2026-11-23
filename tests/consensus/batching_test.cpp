@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -56,6 +57,27 @@ TEST(BatchingTest, ProposalsOnAFollowerAreRefused) {
   const std::uint32_t follower = cluster.leader_id() == 1 ? 2 : 1;
   EXPECT_FALSE(cluster.node(follower).propose(codec::encode(commands(1)[0])));
   EXPECT_FALSE(cluster.node(follower).has_ready());
+}
+
+TEST(BatchingTest, LeaderRefusesProposalsPastTheUncommittedLimit) {
+  Cluster cluster(3, {.max_uncommitted = 8});
+  ASSERT_TRUE(cluster.run_until([&] { return cluster.leader_id() != 0; }));
+  const std::uint32_t leader = cluster.leader_id();
+  cluster.isolate(leader == 1 ? 2 : 1);
+  cluster.isolate(leader == 3 ? 2 : 3);
+  const std::array payload{std::byte{1}};
+  int accepted = 0;
+  for (int i = 0; i < 100; ++i) {
+    accepted += cluster.node(leader).propose(payload) ? 1 : 0;
+    cluster.deliver();
+  }
+  const Raft& raft = cluster.node(leader);
+  EXPECT_LE((raft.log().last_index() - raft.commit()).value(), 8U);
+  EXPECT_LT(accepted, 10);
+  cluster.heal();
+  ASSERT_TRUE(cluster.run_until([&] { return cluster.logs_converged(); }));
+  cluster.tick_all();
+  EXPECT_TRUE(cluster.node(leader).propose(payload));
 }
 
 TEST(BatchingTest, MalformedBatchVisitsNothing) {
