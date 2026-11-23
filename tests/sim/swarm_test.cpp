@@ -54,5 +54,14 @@ TEST(SwarmTest, SwarmSeedsKeepEverySafetyInvariant) {
   }
 }
 
+// Seeds that found B-001 (unbounded uncommitted log under overload): they must recover after heal.
+TEST(SwarmTest, RegressionSeedsRecover) {
+  for (const std::uint64_t seed : {59U, 161U, 239U, 291U, 446U, 463U}) {
+    const SimStats stats = Cluster(swarm(seed)).run();
+    EXPECT_TRUE(stats.violations.empty()) << "seed " << seed << ": " << stats.violations.front();
+    EXPECT_GT(stats.recovered_after, Time(0)) << "seed " << seed;
+  }
+}
+
 }  // namespace
 }  // namespace rme::sim
