@@ -240,7 +240,8 @@ void Cluster::restart(std::size_t i) {
   disks_[i].restarted();
   machines_[i] = EngineMachine{};
   configs_[i].seed = rng_.next();
-  nodes_[i] = consensus::Raft(configs_[i], disks_[i].state(), disks_[i].entries());
+  nodes_[i] =
+      consensus::Raft(configs_[i], disks_[i].state(), disks_[i].log(), disks_[i].snapshot());
   roles_[i] = consensus::Role::kFollower;
   checker_.on_restart(nodes_[i].id());
 }

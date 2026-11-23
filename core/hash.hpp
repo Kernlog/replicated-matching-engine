@@ -6,6 +6,10 @@ namespace rme {
 
 class Hasher {
  public:
+  constexpr Hasher() noexcept = default;
+  // Resumes from a digest, so a snapshot can carry a running hash forward.
+  constexpr explicit Hasher(std::uint64_t state) noexcept : state_(state) {}
+
   constexpr void add(std::uint64_t value) noexcept { state_ = mix(state_ ^ value); }
 
   [[nodiscard]] constexpr std::uint64_t digest() const noexcept { return state_; }

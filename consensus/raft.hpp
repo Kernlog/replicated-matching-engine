@@ -30,7 +30,10 @@ enum class Role : std::uint8_t { kFollower, kPreCandidate, kCandidate, kLeader }
 
 class Raft {
  public:
-  explicit Raft(RaftConfig config, HardState state = {}, std::vector<Entry> log = {});
+  // A restart passes the durable snapshot (if any) and the entries that follow it; the state
+  // machine must already be restored from that snapshot.
+  explicit Raft(RaftConfig config, HardState state = {}, std::vector<Entry> log = {},
+                std::optional<Snapshot> snapshot = std::nullopt);
 
   void tick();
   void step(const Message& message);
@@ -44,6 +47,9 @@ class Raft {
   Ready ready();
   // Storage reports entries up to index durable; the leader counts itself toward commit only then.
   void persisted(Index index);
+  // Replaces the applied prefix of the log with the state machine image taken at applied().
+  // The caller persists the returned snapshot.
+  const Snapshot& compact(std::vector<std::byte> data);
 
   [[nodiscard]] NodeId id() const noexcept { return config_.id; }
   [[nodiscard]] Role role() const noexcept { return role_; }
@@ -51,6 +57,7 @@ class Raft {
   [[nodiscard]] std::optional<NodeId> leader() const noexcept { return leader_; }
   [[nodiscard]] const RaftLog& log() const noexcept { return log_; }
   [[nodiscard]] Index commit() const noexcept { return commit_; }
+  [[nodiscard]] Index applied() const noexcept { return applied_; }
   [[nodiscard]] std::uint64_t dropped() const noexcept { return dropped_; }
 
  private:
@@ -110,6 +117,7 @@ class Raft {
   Index applied_;
   Index persisted_;
   std::uint64_t dropped_ = 0;
+  std::optional<Snapshot> snapshot_;
 };
 
 }  // namespace rme::consensus

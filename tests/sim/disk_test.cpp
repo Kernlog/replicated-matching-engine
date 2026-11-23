@@ -175,7 +175,7 @@ TEST(DiskDeathTest, CorruptingAnUnsyncedEntryAsserts) {
 
 TEST(DiskDeathTest, AppendWithAGapAsserts) {
   Disk disk(1);
-  EXPECT_DEATH(disk.append(batch(2, 1, 1)), "from <= written_.entries.size()");
+  EXPECT_DEATH(disk.append(batch(2, 1, 1)), "from <= std::max");
 }
 
 }  // namespace
