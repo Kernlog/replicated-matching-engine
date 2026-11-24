@@ -58,6 +58,7 @@ int main(int argc, char** argv) {
   spdlog::init_thread_pool(8192, 1);
   spdlog::set_default_logger(spdlog::create_async<spdlog::sinks::stdout_color_sink_mt>("rme"));
   spdlog::set_level(spdlog::level::from_str(level));
+  spdlog::flush_on(spdlog::level::info);
 
   // Signals are taken synchronously on this thread, so every thread the node starts blocks them.
   const sigset_t signals = shutdown_signals();
