@@ -158,7 +158,7 @@ void Node::handle_ready() {
       held.last = {ready.entries.back().index, ready.entries.back().term};
     }
     work.entries = std::move(ready.entries);
-    storage_thread_.value().submit(std::move(work));
+    storage_thread().submit(std::move(work));
   }
   held.seq = seq_;
   held.snapshot = std::move(ready.snapshot);
@@ -166,8 +166,13 @@ void Node::handle_ready() {
   held_.push_back(std::move(held));
 }
 
+io::StorageThread& Node::storage_thread() noexcept {
+  RME_ASSERT(storage_thread_.has_value());
+  return *storage_thread_;  // NOLINT(bugprone-unchecked-optional-access)
+}
+
 bool Node::release() {
-  const std::uint64_t synced = storage_thread_.value().synced();
+  const std::uint64_t synced = storage_thread().synced();
   bool released = false;
   while (!held_.empty() && held_.front().seq <= synced) {
     Held& held = held_.front();

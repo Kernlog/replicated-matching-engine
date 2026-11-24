@@ -82,6 +82,7 @@ class Node {
   bool release();
   void apply(const consensus::Entry& entry);
   void publish();
+  io::StorageThread& storage_thread() noexcept;
 
   NodeConfig config_;
   OutcomeHandler on_outcome_;
