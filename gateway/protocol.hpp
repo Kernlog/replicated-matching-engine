@@ -26,6 +26,16 @@ struct Ack {
   friend bool operator==(const Ack&, const Ack&) = default;
 };
 
+// Sent by a node that is not the leader instead of submitting; 0 when it knows no leader.
+struct Redirect {
+  std::uint32_t leader = 0;
+
+  friend bool operator==(const Redirect&, const Redirect&) = default;
+};
+
+void encode_redirect(const Redirect& redirect, std::vector<std::byte>& out);
+[[nodiscard]] std::optional<Redirect> decode_redirect(std::span<const std::byte> body);
+
 void encode_submit(const codec::ClientRecordBytes& record, std::vector<std::byte>& out);
 void encode_ack(const Ack& ack, std::vector<std::byte>& out);
 

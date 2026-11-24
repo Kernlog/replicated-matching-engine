@@ -117,6 +117,11 @@ void Gateway::on_submit(const std::shared_ptr<Connection>& connection,
     connection->closed = true;
     return;
   }
+  if (const node::NodeStatus status = node_->status(); status.role != consensus::Role::kLeader) {
+    encode_redirect(Redirect{.leader = status.leader}, connection->queued);
+    connection->wake.cancel();
+    return;
+  }
   auto& route = command->client == engine::kRegisterClient ? registering_ : sessions_;
   const std::uint64_t key =
       command->client == engine::kRegisterClient ? command->seq : command->client;
