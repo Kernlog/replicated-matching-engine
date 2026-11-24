@@ -1,5 +1,7 @@
 #include "node/node.hpp"
 
+#include <spdlog/spdlog.h>
+
 #include <algorithm>
 #include <stdexcept>
 #include <variant>
@@ -208,9 +210,16 @@ void Node::apply(const consensus::Entry& entry) {
 }
 
 void Node::publish() {
+  const auto leader = raft_.leader().value_or(consensus::NodeId(0)).value();
+  if (raft_.role() != published_.role.load(std::memory_order_relaxed) ||
+      raft_.term().value() != published_.term.load(std::memory_order_relaxed) ||
+      leader != published_.leader.load(std::memory_order_relaxed)) {
+    spdlog::info("node {} role {} term {} leader {} commit {}", config_.id.value(),
+                 static_cast<int>(raft_.role()), raft_.term().value(), leader,
+                 raft_.commit().value());
+  }
   published_.role.store(raft_.role(), std::memory_order_relaxed);
-  published_.leader.store(raft_.leader().value_or(consensus::NodeId(0)).value(),
-                          std::memory_order_relaxed);
+  published_.leader.store(leader, std::memory_order_relaxed);
   published_.term.store(raft_.term().value(), std::memory_order_relaxed);
   published_.commit.store(raft_.commit().value(), std::memory_order_relaxed);
   published_.applied.store(replica_.applied_index(), std::memory_order_relaxed);
