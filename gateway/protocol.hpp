@@ -13,7 +13,7 @@
 namespace rme::gateway {
 
 // Client frames share the peer frame header; the type field tells them apart.
-enum class FrameType : std::uint16_t { kSubmit = 16, kAck = 17, kRedirect = 18 };
+enum class FrameType : std::uint8_t { kSubmit = 16, kAck = 17, kRedirect = 18 };
 
 // Sent once the command's entry is committed and applied on the leader, with its events.
 struct Ack {

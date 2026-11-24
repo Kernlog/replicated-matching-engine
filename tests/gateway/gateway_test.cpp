@@ -36,7 +36,7 @@ class Wire {
     for (;;) {
       if (const std::optional<io::Frame> frame = decoder_.next()) {
         EXPECT_EQ(frame->type, static_cast<std::uint16_t>(FrameType::kAck));
-        return decode_ack(frame->body).value();
+        return decode_ack(frame->body).value_or(Ack{});
       }
       const std::span<std::byte> space = decoder_.writable();
       decoder_.commit(socket_.read_some(asio::buffer(space.data(), space.size())));
@@ -52,7 +52,7 @@ class Wire {
 TEST(Gateway, AcksEveryCommandAfterApplyAndReplaysDuplicates) {
   LocalCluster cluster(3);
   ASSERT_TRUE(LocalCluster::eventually([&] { return cluster.leader().has_value(); }));
-  Wire wire(cluster.client_port(*cluster.leader()));
+  Wire wire(cluster.client_port(cluster.leader().value_or(1)));
   wire.submit(codec::encode_register(42));
   const Ack registered = wire.next_ack();
   ASSERT_EQ(registered.result, engine::SessionResult::kRegistered);

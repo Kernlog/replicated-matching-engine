@@ -41,7 +41,7 @@ class Gateway {
 
   asio::awaitable<void> accept();
   asio::awaitable<void> serve(std::shared_ptr<Connection> connection);
-  asio::awaitable<void> write_loop(std::shared_ptr<Connection> connection);
+  static asio::awaitable<void> write_loop(std::shared_ptr<Connection> connection);
   void on_submit(const std::shared_ptr<Connection>& connection, std::span<const std::byte> body);
   void drain();
 
