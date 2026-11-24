@@ -43,8 +43,12 @@ jobs:
           for round in 1 2 3; do
             for side in base head; do
               src=$([ "$side" = base ] && echo "$RUNNER_TEMP/base" || echo "$GITHUB_WORKSPACE")
-              taskset -c 1 "$src/build/bench/bench/engine_bench" --benchmark_repetitions=3 \
-                --benchmark_format=json --benchmark_out="$RUNNER_TEMP/out/$side/$round.json" >/dev/null
+              for spec in engine_bench:1 queue_bench:1,2; do
+                bin="$src/build/bench/bench/${spec%%:*}"
+                [ -x "$bin" ] || continue
+                taskset -c "${spec#*:}" "$bin" --benchmark_repetitions=3 --benchmark_format=json \
+                  --benchmark_out="$RUNNER_TEMP/out/$side/${spec%%:*}-$round.json" >/dev/null
+              done
             done
           done
           for side in base head; do

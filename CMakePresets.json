@@ -38,6 +38,15 @@
       }
     },
     {
+      "name": "tsan",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS": "-O1 -g -fsanitize=thread",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread"
+      }
+    },
+    {
       "name": "bench",
       "inherits": "release",
       "cacheVariables": {
@@ -73,6 +82,10 @@
       "configurePreset": "asan"
     },
     {
+      "name": "tsan",
+      "configurePreset": "tsan"
+    },
+    {
       "name": "bench",
       "configurePreset": "bench"
     },
@@ -105,6 +118,16 @@
     {
       "name": "asan",
       "configurePreset": "asan",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "ignore"
+      }
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
       "output": {
         "outputOnFailure": true
       },
