@@ -5,3 +5,6 @@ target_link_libraries(engine_bench PRIVATE rme_engine rme_codec rme_log rme_test
 
 add_executable(queue_bench queue_bench.cpp)
 target_link_libraries(queue_bench PRIVATE rme_core benchmark::benchmark)
+
+add_executable(io_bench io_bench.cpp)
+target_link_libraries(io_bench PRIVATE rme_io benchmark::benchmark)
