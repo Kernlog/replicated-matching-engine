@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -230,9 +231,9 @@ int run(const std::vector<rme::gateway::Endpoint>& endpoints, double rate, doubl
   };
   // Under overload the leader refuses proposals; every later seq of that session is then out of
   // order, so only applied commands count.
-  std::cout << "rate=" << rate << " sent=" << total << " acked=" << acked << " applied=" << applied
-            << " p50_us=" << us(50) << " p99_us=" << us(99) << " p99.9_us=" << us(99.9)
-            << " p99.99_us=" << us(99.99)
+  std::cout << std::fixed << std::setprecision(1) << "rate=" << rate << " sent=" << total
+            << " acked=" << acked << " applied=" << applied << " p50_us=" << us(50)
+            << " p99_us=" << us(99) << " p99.9_us=" << us(99.9) << " p99.99_us=" << us(99.99)
             << " max_us=" << static_cast<double>(hdr_max(merged.get())) / 1000.0 << '\n';
   if (!out.empty()) {
     if (FILE* file = std::fopen(out.c_str(), "w")) {
