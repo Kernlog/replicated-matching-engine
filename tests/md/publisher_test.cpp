@@ -54,7 +54,7 @@ class UdpSink {
 };
 
 TEST(Publisher, SendsEveryRecordInSeqOrderInFullDatagrams) {
-  UdpSink sink;
+  const UdpSink sink;
   constexpr std::uint64_t kEntries = 2000;
   std::uint64_t expected_messages = 0;
   PublisherStats stats;
