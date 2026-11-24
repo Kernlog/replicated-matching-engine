@@ -55,15 +55,15 @@ TEST(SpscQueue, BatchesStopAtCapacityAndAtWhatIsQueued) {
 TEST(SpscQueue, MovesOwningValues) {
   SpscQueue<std::unique_ptr<int>> queue(2);
   ASSERT_TRUE(queue.try_push(std::make_unique<int>(7)));
-  std::optional<std::unique_ptr<int>> popped = queue.try_pop();
-  ASSERT_TRUE(popped.has_value());
-  EXPECT_EQ(**popped, 7);
+  std::unique_ptr<int> popped = queue.try_pop().value_or(nullptr);
+  ASSERT_NE(popped, nullptr);
+  EXPECT_EQ(*popped, 7);
 }
 
 TEST(SpscQueue, TwoThreadsTransferEveryItemInOrder) {
   constexpr std::uint64_t kItems = 1'000'000;
   SpscQueue<std::uint64_t> queue(1024);
-  std::jthread producer([&queue] {
+  const std::jthread producer([&queue] {
     std::array<std::uint64_t, 32> batch{};
     std::uint64_t next = 0;
     while (next < kItems) {

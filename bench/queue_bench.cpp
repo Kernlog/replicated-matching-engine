@@ -15,7 +15,7 @@ constexpr std::uint64_t kItems = 1U << 24U;
 void transfer(benchmark::State& state, std::size_t batch) {
   for (auto _ : state) {
     rme::SpscQueue<std::uint64_t> queue(1U << 14U);
-    std::jthread producer([&queue, batch] {
+    const std::jthread producer([&queue, batch] {
       std::array<std::uint64_t, 256> items{};
       std::uint64_t next = 0;
       while (next < kItems) {
@@ -59,7 +59,7 @@ void spsc_round_trip(benchmark::State& state) {
   rme::SpscQueue<std::uint64_t> ping(1024);
   rme::SpscQueue<std::uint64_t> pong(1024);
   std::atomic<bool> stop{false};
-  std::jthread echo([&] {
+  const std::jthread echo([&] {
     while (!stop.load(std::memory_order_relaxed)) {
       if (auto value = ping.try_pop()) {
         pong.push(std::uint64_t{*value});

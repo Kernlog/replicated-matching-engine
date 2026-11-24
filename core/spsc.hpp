@@ -82,9 +82,15 @@ class SpscQueue {
 
   // Spins while the ring is full; the consumer is expected to keep draining.
   void push(T&& value) noexcept {
-    while (!try_push(std::move(value))) {
-      cpu_relax();
+    const std::uint64_t tail = producer_.tail.load(std::memory_order_relaxed);
+    while (tail - producer_.head_cache == capacity_) {
+      producer_.head_cache = consumer_.head.load(std::memory_order_acquire);
+      if (tail - producer_.head_cache == capacity_) {
+        cpu_relax();
+      }
     }
+    slots_[tail & mask_] = std::move(value);
+    publish(tail + 1);
   }
 
   std::optional<T> try_pop() noexcept {
