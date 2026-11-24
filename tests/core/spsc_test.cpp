@@ -55,7 +55,7 @@ TEST(SpscQueue, BatchesStopAtCapacityAndAtWhatIsQueued) {
 TEST(SpscQueue, MovesOwningValues) {
   SpscQueue<std::unique_ptr<int>> queue(2);
   ASSERT_TRUE(queue.try_push(std::make_unique<int>(7)));
-  std::unique_ptr<int> popped = queue.try_pop().value_or(nullptr);
+  const std::unique_ptr<int> popped = queue.try_pop().value_or(nullptr);
   ASSERT_NE(popped, nullptr);
   EXPECT_EQ(*popped, 7);
 }
