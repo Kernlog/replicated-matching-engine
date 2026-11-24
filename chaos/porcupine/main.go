@@ -52,6 +52,7 @@ func main() {
 	}
 	defer file.Close()
 	var ops []porcupine.Operation
+	var unanswered []bool
 	var end int64
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -67,8 +68,10 @@ func main() {
 			end = ret
 		}
 		op := porcupine.Operation{ClientId: worker, Input: f[1] + "/" + f[2], Call: call, Return: ret}
+		// A duplicate's ack names the resend's index, so only first executions pin a position.
 		op.Output = output{known: f[5] == "ok", index: index}
 		ops = append(ops, op)
+		unanswered = append(unanswered, f[5] == "info")
 	}
 	// An unanswered command may take effect any time after it was sent.
 	for i := range ops {
