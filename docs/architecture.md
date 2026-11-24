@@ -71,8 +71,7 @@ vote again in a term it already voted in. After replacing a node's disk, start i
 node then rejoins without voting and without counting toward any commit quorum until it has
 learned every peer's term and caught up to a leader of the current term; it removes the marker
 itself once recovered, so a crash during recovery keeps the protection. Recover one node at a
-time: two lost nodes out of three cannot elect a leader until one of them is restored from a
-peer.
+time: with two of three nodes recovering, no leader can be elected, and recovery needs one.
 
 ## Verification
 
