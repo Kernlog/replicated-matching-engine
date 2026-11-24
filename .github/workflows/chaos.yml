@@ -36,7 +36,9 @@ jobs:
           for faults in kill partition latency,pause wipe kill,partition,latency,pause,wipe; do
             for seed in 1 2; do
               out="chaos/runs/${faults//,/-}-$seed"
-              FAULTS=$faults SEED=$seed OUT=$out SECONDS_PER_RUN=60 chaos/run.sh
+              # A hosted runner pushes about 5x the operations per second of the bench host;
+              # 2 clients for 40 s keep each history near the size the bench host gate checks.
+              FAULTS=$faults SEED=$seed OUT=$out SECONDS_PER_RUN=40 WORKERS=2 chaos/run.sh
               chaos/check.sh "$out" || status=1
             done
           done
