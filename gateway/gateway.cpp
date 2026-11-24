@@ -44,12 +44,17 @@ std::uint16_t Gateway::port() const {
 }
 
 node::Node::OutcomeHandler Gateway::outcome_handler() {
+  // The core never waits on the gateway: with the ring full (a stalled or stopped gateway) the
+  // ack is dropped, and the client's resend of that seq gets the cached result back.
   return [this](std::uint64_t index, const engine::Outcome& outcome) {
-    acks_.push(Ack{.index = index,
-                   .client = outcome.client,
-                   .seq = outcome.seq,
-                   .result = outcome.result,
-                   .events = outcome.events});
+    if (!acks_.try_push(Ack{.index = index,
+                            .client = outcome.client,
+                            .seq = outcome.seq,
+                            .result = outcome.result,
+                            .events = outcome.events})) {
+      dropped_acks_.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
     if (!drain_posted_.exchange(true, std::memory_order_acq_rel)) {
       asio::post(io_, [this] { drain(); });
     }
