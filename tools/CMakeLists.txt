@@ -13,4 +13,7 @@ if(TARGET rme_testing)
   find_package(CLI11 CONFIG REQUIRED)
   add_executable(chaos_client chaos_client.cpp)
   target_link_libraries(chaos_client PRIVATE rme_gateway rme_testing CLI11::CLI11)
+
+  add_executable(audit audit.cpp)
+  target_link_libraries(audit PRIVATE rme_io rme_replica CLI11::CLI11)
 endif()

@@ -1,0 +1,48 @@
+name: chaos
+
+on:
+  schedule:
+    - cron: "30 4 * * *"
+  workflow_dispatch:
+
+env:
+  VCPKG_COMMIT: 93ad765c7b66ab9ce97469ec23a90b15c3a14ee5
+  VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+  VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-cache
+
+jobs:
+  chaos:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CXX: clang++-18
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: clang-release
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.22"
+          cache-dependency-path: chaos/porcupine/go.sum
+      - run: cmake --preset release -DBUILD_TESTING=OFF
+      - run: cmake --build --preset release --target chaos_client audit
+      - run: docker compose build
+      - name: kill and partition runs
+        shell: bash
+        run: |
+          status=0
+          for faults in kill partition latency,pause kill,partition,latency,pause; do
+            for seed in 1 2; do
+              out="chaos/runs/${faults//,/-}-$seed"
+              FAULTS=$faults SEED=$seed OUT=$out SECONDS_PER_RUN=60 chaos/run.sh
+              chaos/check.sh "$out" || status=1
+            done
+          done
+          exit $status
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: chaos-runs
+          path: chaos/runs
