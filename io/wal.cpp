@@ -42,6 +42,50 @@ constexpr std::uint64_t record_bytes(std::size_t length) noexcept {
   return sizeof(RecordHeader) + padded(length);
 }
 
+constexpr std::size_t kSector = 512;
+
+bool all_zero(std::span<const std::byte> bytes) noexcept {
+  return std::ranges::all_of(bytes, [](std::byte b) { return b == std::byte{0}; });
+}
+
+// True when some sector the record overlaps still holds only zeros over the record's bytes.
+bool has_unwritten_sector(std::span<const std::byte> record, std::uint64_t offset) noexcept {
+  std::uint64_t at = 0;
+  while (at < record.size()) {
+    const std::uint64_t sector_end = ((offset + at) / kSector + 1) * kSector - offset;
+    const std::uint64_t until = std::min<std::uint64_t>(sector_end, record.size());
+    if (all_zero(record.subspan(at, until - at))) {
+      return true;
+    }
+    at = until;
+  }
+  return false;
+}
+
+// A segment ends early only when the next record did not fit, so a next segment whose first
+// record would have fit means this one lost its tail.
+bool next_would_fit(const std::filesystem::path& next, std::uint64_t space) {
+  const log::File file(next, O_RDONLY);
+  RecordHeader header;
+  if (::pread(file.fd(), &header, sizeof header, 0) != static_cast<ssize_t>(sizeof header)) {
+    return false;
+  }
+  return !all_zero(std::as_bytes(std::span(&header, 1))) && record_bytes(header.length) <= space;
+}
+
+void zero_from(const std::filesystem::path& path, std::uint64_t from, std::uint64_t to) {
+  const log::File file(path, O_RDWR);
+  const std::vector<std::byte> zeros(std::min<std::uint64_t>(to - from, std::uint64_t{1} << 20U));
+  while (from < to) {
+    std::array<iovec, 1> iov{{{const_cast<std::byte*>(zeros.data()),  // NOLINT(*-const-cast)
+                               std::min<std::size_t>(zeros.size(), to - from)}}};
+    const std::size_t bytes = iov[0].iov_len;
+    pwritev_all(file.fd(), iov, static_cast<off_t>(from));
+    from += bytes;
+  }
+  sync_data(file.fd());
+}
+
 [[noreturn]] void corrupt(const std::filesystem::path& path, std::uint64_t offset) {
   throw std::runtime_error("corrupt wal record in " + path.string() + " at " +
                            std::to_string(offset));
@@ -73,36 +117,62 @@ void Wal::replay() {
     }
   }
   std::ranges::sort(paths);
-  for (const std::filesystem::path& path : paths) {
-    offset_ = replay_segment(path);
+  for (std::size_t i = 0; i < paths.size(); ++i) {
+    const std::vector<std::byte> data = read_file(paths[i]);
+    const auto [end, torn] = replay_segment(paths[i], data);
+    const bool rest_written = !all_zero(std::span(data).subspan(end));
+    const bool next_fits = i + 1 < paths.size() && next_would_fit(paths[i + 1], data.size() - end);
+    if (torn || rest_written || next_fits) {
+      // Everything after a torn write is unsynced, so it is dropped and zeroed so that later
+      // appends cannot run into stale bytes.
+      zero_from(paths[i], end, data.size());
+      for (std::size_t j = i + 1; j < paths.size(); ++j) {
+        std::filesystem::remove(paths[j]);
+      }
+      sync_dir(dir_);
+      truncated_ += data.size() - end;
+      paths.resize(i + 1);
+    }
+    offset_ = end;
   }
   if (!paths.empty()) {
     current_.emplace(paths.back(), O_RDWR);
     sequence_ = std::stoull(paths.back().stem().string());
+    if (std::filesystem::file_size(paths.back()) < options_.segment_bytes) {
+      preallocate(current_->fd(), options_.segment_bytes);
+      sync_file(current_->fd());
+    }
   }
 }
 
-std::uint64_t Wal::replay_segment(const std::filesystem::path& path) {
-  const std::vector<std::byte> data = read_file(path);
+// Stops at the first record that is not intact. A record with an unwritten (zero) sector is a torn
+// write and ends the log there; anything else that fails its CRC is corruption and fails stop.
+Wal::Replayed Wal::replay_segment(const std::filesystem::path& path,
+                                  std::span<const std::byte> data) {
   std::uint64_t offset = 0;
   while (offset + sizeof(RecordHeader) <= data.size()) {
+    const auto head = data.subspan(offset, sizeof(RecordHeader));
+    if (all_zero(head)) {
+      return {.end = offset, .torn = false};
+    }
     RecordHeader header;
-    std::memcpy(&header, &data[offset], sizeof header);
-    if (header.length == 0 && header.crc == 0 && header.index == 0) {
-      break;
-    }
+    std::memcpy(&header, head.data(), sizeof header);
     const bool known = header.kind == RecordKind::kEntry || header.kind == RecordKind::kSnapshot;
-    if (!known || offset + record_bytes(header.length) > data.size()) {
+    const std::uint64_t size = std::min(record_bytes(header.length), data.size() - offset);
+    const auto record = data.subspan(offset, size);
+    const bool intact =
+        known && size == record_bytes(header.length) &&
+        record_crc(header, record.subspan(sizeof header, header.length)) == header.crc;
+    if (!intact) {
+      if (has_unwritten_sector(record, offset)) {
+        return {.end = offset, .torn = true};
+      }
       corrupt(path, offset);
     }
-    const auto body = std::span(data).subspan(offset + sizeof header, header.length);
-    if (record_crc(header, body) != header.crc) {
-      corrupt(path, offset);
-    }
-    apply(header, body);
-    offset += record_bytes(header.length);
+    apply(header, record.subspan(sizeof header, header.length));
+    offset += size;
   }
-  return offset;
+  return {.end = offset, .torn = false};
 }
 
 void Wal::apply(const RecordHeader& header, std::span<const std::byte> body) {
