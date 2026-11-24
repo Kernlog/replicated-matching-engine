@@ -13,6 +13,7 @@
 #include <thread>
 #include <vector>
 
+#include "gateway/gateway.hpp"
 #include "node/node.hpp"
 #include "tests/io/temp_dir.hpp"
 
@@ -38,9 +39,11 @@ struct Recorded {
 
 class LocalCluster {
  public:
-  explicit LocalCluster(std::uint32_t size) : dirs_(size), outcomes_(size), nodes_(size) {
+  explicit LocalCluster(std::uint32_t size)
+      : dirs_(size), outcomes_(size), gateways_(size), nodes_(size) {
     for (std::uint32_t id = 1; id <= size; ++id) {
       members_.push_back({consensus::NodeId(id), "127.0.0.1", free_port()});
+      client_ports_.push_back(free_port());
     }
     for (std::uint32_t id = 1; id <= size; ++id) {
       start(id);
@@ -55,15 +58,24 @@ class LocalCluster {
     config.listen_host = "127.0.0.1";
     config.tick = std::chrono::milliseconds(5);
     auto& sink = outcomes_[id - 1];
-    nodes_[id - 1] = std::make_unique<Node>(
-        config, [&sink](std::uint64_t index, const engine::Outcome& outcome) {
+    gateways_[id - 1] = std::make_unique<gateway::Gateway>("127.0.0.1", client_ports_[id - 1]);
+    nodes_[id - 1] =
+        std::make_unique<Node>(config, [&sink, forward = gateways_[id - 1]->outcome_handler()](
+                                           std::uint64_t index, const engine::Outcome& outcome) {
+          forward(index, outcome);
           const std::scoped_lock lock(sink.mutex);
           sink.recorded.push_back({index, outcome});
         });
     nodes_[id - 1]->start();
+    gateways_[id - 1]->start(*nodes_[id - 1]);
   }
 
-  void stop(std::uint32_t id) { nodes_[id - 1].reset(); }
+  void stop(std::uint32_t id) {
+    gateways_[id - 1].reset();
+    nodes_[id - 1].reset();
+  }
+
+  [[nodiscard]] std::uint16_t client_port(std::uint32_t id) const { return client_ports_[id - 1]; }
 
   Node& node(std::uint32_t id) { return *nodes_[id - 1]; }
   [[nodiscard]] bool running(std::uint32_t id) const { return nodes_[id - 1] != nullptr; }
@@ -101,8 +113,10 @@ class LocalCluster {
   };
 
   std::vector<io::PeerAddress> members_;
+  std::vector<std::uint16_t> client_ports_;
   std::vector<io::TempDir> dirs_;
   std::vector<Sink> outcomes_;
+  std::vector<std::unique_ptr<gateway::Gateway>> gateways_;
   std::vector<std::unique_ptr<Node>> nodes_;
 };
 

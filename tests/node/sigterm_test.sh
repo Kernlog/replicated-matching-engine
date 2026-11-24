@@ -5,7 +5,7 @@ bin=$1
 dir=$(mktemp -d)
 trap 'rm -rf "$dir"' EXIT
 port=$(( 20000 + RANDOM % 20000 ))
-"$bin" --id 1 --data-dir "$dir/data" --member "127.0.0.1:$port" --listen 127.0.0.1 --tick-ms 5 \
+"$bin" --id 1 --data-dir "$dir/data" --member "127.0.0.1:$port" --listen 127.0.0.1 --client-port $((port + 1)) --tick-ms 5 \
   > "$dir/out.log" 2>&1 &
 pid=$!
 for _ in $(seq 1 100); do
