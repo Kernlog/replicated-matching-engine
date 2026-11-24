@@ -1,1 +1,1 @@
-rme_add_test(io_test SOURCES frame_test.cpp LIBS rme_io)
+rme_add_test(io_test SOURCES frame_test.cpp wal_test.cpp LIBS rme_io)
