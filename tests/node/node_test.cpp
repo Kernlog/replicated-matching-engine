@@ -92,5 +92,30 @@ TEST(Node, RestartedFollowerRecoversFromDiskAndCatchesUp) {
   EXPECT_TRUE(LocalCluster::eventually([&] { return converged(cluster, 3); }));
 }
 
+// A leader at its uncommitted limit must hold commands back, not drop them: a dropped seq would
+// make every later command of the session out of order.
+TEST(Node, LeaderAtItsUncommittedLimitHoldsCommandsInsteadOfDroppingThem) {
+  consensus::RaftConfig raft;
+  raft.max_entry_bytes = codec::kClientRecordSize;
+  raft.max_uncommitted_entries = 2;
+  // Slow disks must not trigger an election mid-test: a follower drops what it is sent.
+  raft.election_ticks = 200;
+  LocalCluster cluster(3, raft);
+  ASSERT_TRUE(LocalCluster::eventually([&] { return cluster.leader().has_value(); }));
+  const std::uint32_t leader = cluster.leader().value_or(1);
+  const std::uint64_t session = register_client(cluster, leader, 3);
+  testing::CommandStream stream(2);
+  submit_commands(cluster, leader, session, 1, 500, stream);
+  ASSERT_TRUE(
+      LocalCluster::eventually([&] { return applied_commands(cluster, leader, session) == 500; }));
+  const std::vector<Recorded> outcomes = cluster.outcomes(leader);
+  EXPECT_EQ(std::ranges::count_if(outcomes,
+                                  [](const Recorded& recorded) {
+                                    return recorded.outcome.result ==
+                                           engine::SessionResult::kOutOfOrder;
+                                  }),
+            0);
+}
+
 }  // namespace
 }  // namespace rme::node

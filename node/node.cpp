@@ -106,10 +106,7 @@ void Node::run(const std::stop_token& stop) {
       raft_.step(*message);
       busy = true;
     }
-    while (std::optional<std::vector<std::byte>> command = commands_.try_pop()) {
-      static_cast<void>(raft_.propose(*command));
-      busy = true;
-    }
+    busy = propose_commands() || busy;
     if (const auto now = Clock::now(); now >= next_tick) {
       raft_.tick();
       next_tick = std::max(next_tick + config_.tick, now);
@@ -134,6 +131,27 @@ void Node::run(const std::stop_token& stop) {
     } else {
       std::this_thread::sleep_for(kIdleSleep);
     }
+  }
+}
+
+// A leader at its uncommitted limit keeps the refused command and stops draining, so the ring
+// fills and pushes back on the gateway; dropping it would leave a hole in the session's seqs and
+// turn every later command of a pipelined client into out-of-order. A follower drops commands: the
+// client resends them to the leader.
+bool Node::propose_commands() {
+  bool any = false;
+  for (;;) {
+    if (!deferred_) {
+      deferred_ = commands_.try_pop();
+      if (!deferred_) {
+        return any;
+      }
+    }
+    any = true;
+    if (!raft_.propose(*deferred_) && raft_.role() == consensus::Role::kLeader) {
+      return any;
+    }
+    deferred_.reset();
   }
 }
 
