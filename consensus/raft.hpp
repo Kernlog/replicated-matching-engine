@@ -75,6 +75,7 @@ class Raft {
     Index next;
     Index match;
     bool recent_active = false;
+    bool recovering = false;
     bool probing = true;
     bool probe_sent = false;
     std::uint32_t stalled_ticks = 0;

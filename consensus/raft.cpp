@@ -320,11 +320,12 @@ std::size_t Raft::send_entries(const Progress& peer) {
 }
 
 // Only an entry from the current term is committed by counting replicas (paper section 5.4.2);
-// earlier entries commit with it.
+// earlier entries commit with it. A recovering follower is replicated to but not counted: it may
+// have acknowledged a conflicting entry that a newer leader committed before its disk was lost.
 void Raft::maybe_commit() {
   matches_.clear();
   for (const Progress& peer : progress_) {
-    matches_.push_back(peer.match);
+    matches_.push_back(peer.recovering ? Index(0) : peer.match);
   }
   const auto median = matches_.begin() + static_cast<std::ptrdiff_t>(matches_.size() / 2);
   std::ranges::nth_element(matches_, median, std::greater{});
@@ -457,7 +458,7 @@ void Raft::on(const Message& message, const AppendRequest& request) {
   if (log_.matches(request.commit, message.term)) {
     maybe_recover(request.commit);
   }
-  send(message.from, AppendResponse{true, last_new, Index(0), Term(0)});
+  send(message.from, AppendResponse{true, last_new, Index(0), Term(0), recovering_});
 }
 
 void Raft::on(const Message& message, const AppendResponse& response) {
@@ -466,6 +467,7 @@ void Raft::on(const Message& message, const AppendResponse& response) {
   }
   Progress& peer = progress_of(message.from);
   if (response.success) {
+    peer.recovering = response.recovering;
     if (response.match > peer.match) {
       peer.match = response.match;
       peer.stalled_ticks = 0;
@@ -500,7 +502,7 @@ void Raft::on(const Message& message, const InstallSnapshot& install) {
   become_follower(term_, message.from);
   const Snapshot& snapshot = install.snapshot;
   if (snapshot.index <= commit_) {
-    send(message.from, AppendResponse{true, commit_, Index(0), Term(0)});
+    send(message.from, AppendResponse{true, commit_, Index(0), Term(0), recovering_});
     return;
   }
   log_.install(snapshot.index, snapshot.term);
@@ -509,7 +511,7 @@ void Raft::on(const Message& message, const InstallSnapshot& install) {
   applied_ = snapshot.index;
   snapshot_ = snapshot;
   installed_ = snapshot;
-  send(message.from, AppendResponse{true, snapshot.index, Index(0), Term(0)});
+  send(message.from, AppendResponse{true, snapshot.index, Index(0), Term(0), recovering_});
 }
 
 }  // namespace rme::consensus

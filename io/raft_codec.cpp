@@ -129,6 +129,7 @@ void encode_body(Writer& writer, const AppendResponse& body) {
   writer.put(body.match.value());
   writer.put(body.conflict_index.value());
   writer.put(body.conflict_term.value());
+  put_flag(writer, body.recovering);
 }
 
 void encode_body(Writer& writer, const InstallSnapshot& body) {
@@ -167,7 +168,8 @@ bool decode_body(Reader& reader, AppendRequest& body) {
 
 bool decode_body(Reader& reader, AppendResponse& body) {
   return reader.get_flag(body.success) && reader.get_strong(body.match) &&
-         reader.get_strong(body.conflict_index) && reader.get_strong(body.conflict_term);
+         reader.get_strong(body.conflict_index) && reader.get_strong(body.conflict_term) &&
+         reader.get_flag(body.recovering);
 }
 
 bool decode_body(Reader& reader, InstallSnapshot& body) {

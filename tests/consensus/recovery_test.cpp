@@ -127,5 +127,38 @@ TEST(RecoveryTest, HintlessRejectionLeavesProgressAlone) {
   EXPECT_EQ(raft.role(), Role::kLeader);
 }
 
+TEST(RecoveryTest, RecoveringFollowerMarksItsAcks) {
+  Raft raft(wiped(1, 3));
+  raft.step({NodeId(2), NodeId(1), Term(3),
+             AppendRequest{
+                 Index(0), Term(0), {Entry{Term(3), Index(1), EntryType::kNoop, {}}}, Index(0)}});
+  const Ready ready = raft.ready();
+  ASSERT_EQ(ready.messages.size(), 1U);
+  const auto& ack = std::get<AppendResponse>(ready.messages.front().body);
+  EXPECT_TRUE(ack.success);
+  EXPECT_TRUE(ack.recovering);
+}
+
+// A stale leader cut off from a newer term must not commit over that term's entries by counting a
+// follower that helped commit them and then lost its disk (sim seed 97276).
+TEST(RecoveryTest, StaleLeaderCannotCommitThroughARecoveringFollower) {
+  Cluster cluster(3, kPaperRaft);
+  cluster.campaign(1);
+  cluster.propose(1, 3);
+  const Index committed = cluster.node(1).commit();
+  cluster.isolate(1);
+  cluster.propose(1, 2);
+  cluster.campaign(2);
+  cluster.propose(2, 2);
+  ASSERT_GT(cluster.node(2).commit(), cluster.node(1).log().last_index());
+  cluster.wipe(3);
+  cluster.partition({{1, 3}, {2}});
+  ASSERT_TRUE(cluster.run_until(
+      [&] { return cluster.node(3).log().last_index() == cluster.node(1).log().last_index(); }));
+  EXPECT_TRUE(cluster.node(3).recovering());
+  EXPECT_EQ(cluster.node(1).role(), Role::kLeader);
+  EXPECT_EQ(cluster.node(1).commit(), committed);
+}
+
 }  // namespace
 }  // namespace rme::consensus
