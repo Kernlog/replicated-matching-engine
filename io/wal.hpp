@@ -62,11 +62,18 @@ class Wal {
   void sync();
 
   [[nodiscard]] const WalStats& stats() const noexcept { return stats_; }
+  // Bytes cleared past the last intact record when the log was opened.
+  [[nodiscard]] std::uint64_t truncated() const noexcept { return truncated_; }
   [[nodiscard]] const std::filesystem::path& dir() const noexcept { return dir_; }
 
  private:
+  struct Replayed {
+    std::uint64_t end = 0;
+    bool torn = false;
+  };
+
   void replay();
-  std::uint64_t replay_segment(const std::filesystem::path& path);
+  Replayed replay_segment(const std::filesystem::path& path, std::span<const std::byte> data);
   void apply(const RecordHeader& header, std::span<const std::byte> body);
   void stage(const RecordHeader& header, std::span<const std::byte> body);
   void flush();
@@ -86,6 +93,7 @@ class Wal {
   consensus::Index mark_index_;
   consensus::Term mark_term_;
   WalStats stats_;
+  std::uint64_t truncated_ = 0;
 };
 
 [[nodiscard]] std::filesystem::path segment_path(const std::filesystem::path& dir,
