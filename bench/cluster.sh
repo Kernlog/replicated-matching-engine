@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Runs a 3-node cluster as local processes and drives it with the open-loop load generator.
 # usage: bench/cluster.sh <rate> [seconds] [hgrm-out] ; NODE_FLAGS adds flags to every node,
+# DATA_ROOT=/dev/shm keeps the WALs in memory to measure the software path alone,
 # CPUS="1,9,2 3,11,4 5,13,6" pins node i's core, network and storage threads.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 rate=$1 seconds=${2:-10} hgrm=${3:-}
 bin=${BIN:-build/release}
-dir=$(mktemp -d)
+dir=$(mktemp -d -p "${DATA_ROOT:-/tmp}")
 pids=()
 trap 'kill "${pids[@]}" 2>/dev/null; wait 2>/dev/null; rm -rf "$dir"' EXIT
 read -r -a cpus <<< "${CPUS:-}"

@@ -137,6 +137,9 @@ rme::gateway::Endpoint find_leader(const std::vector<rme::gateway::Endpoint>& me
   return members.at(probe.target());
 }
 
+int run(const std::vector<rme::gateway::Endpoint>& endpoints, double rate, double seconds,
+        double warmup, std::uint32_t connections, const std::string& out);
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -159,6 +162,18 @@ int main(int argc, char** argv) {
   for (const std::string& member : members) {
     endpoints.push_back(parse(member));
   }
+  try {
+    return run(endpoints, rate, seconds, warmup, connections, out);
+  } catch (const std::exception& error) {
+    std::cerr << "loadgen: " << error.what() << '\n';
+    return 2;
+  }
+}
+
+namespace {
+
+int run(const std::vector<rme::gateway::Endpoint>& endpoints, double rate, double seconds,
+        double warmup, std::uint32_t connections, const std::string& out) {
   const rme::gateway::Endpoint leader = find_leader(endpoints);
   const auto total = static_cast<std::uint64_t>(rate * (seconds + warmup));
   const std::uint64_t per_stream = total / connections + 1;
@@ -219,3 +234,5 @@ int main(int argc, char** argv) {
   }
   return acked == total ? 0 : 1;
 }
+
+}  // namespace
