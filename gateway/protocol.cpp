@@ -1,5 +1,6 @@
 #include "gateway/protocol.hpp"
 
+#include <array>
 #include <cstring>
 
 #include "engine/event_words.hpp"
@@ -29,6 +30,24 @@ void append(std::vector<std::byte>& out, const T& value) {
 }
 
 }  // namespace
+
+void encode_redirect(const Redirect& redirect, std::vector<std::byte>& out) {
+  const std::array<std::uint32_t, 2> words{redirect.leader, 0};
+  io::encode_frame(static_cast<std::uint16_t>(FrameType::kRedirect),
+                   std::as_bytes(std::span(words)), out);
+}
+
+std::optional<Redirect> decode_redirect(std::span<const std::byte> body) {
+  std::array<std::uint32_t, 2> words{};
+  if (body.size() != sizeof words) {
+    return std::nullopt;
+  }
+  std::memcpy(words.data(), body.data(), sizeof words);
+  if (words[1] != 0) {
+    return std::nullopt;
+  }
+  return Redirect{.leader = words[0]};
+}
 
 void encode_submit(const codec::ClientRecordBytes& record, std::vector<std::byte>& out) {
   io::encode_frame(static_cast<std::uint16_t>(FrameType::kSubmit), record, out);

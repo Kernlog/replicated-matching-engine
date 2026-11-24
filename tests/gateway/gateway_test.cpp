@@ -33,10 +33,15 @@ class Wire {
   }
 
   Ack next_ack() {
+    const auto [type, body] = next_frame();
+    EXPECT_EQ(type, static_cast<std::uint16_t>(FrameType::kAck));
+    return decode_ack(body).value_or(Ack{});
+  }
+
+  std::pair<std::uint16_t, std::vector<std::byte>> next_frame() {
     for (;;) {
       if (const std::optional<io::Frame> frame = decoder_.next()) {
-        EXPECT_EQ(frame->type, static_cast<std::uint16_t>(FrameType::kAck));
-        return decode_ack(frame->body).value_or(Ack{});
+        return {frame->type, {frame->body.begin(), frame->body.end()}};
       }
       const std::span<std::byte> space = decoder_.writable();
       decoder_.commit(socket_.read_some(asio::buffer(space.data(), space.size())));
@@ -81,6 +86,34 @@ TEST(Gateway, AcksEveryCommandAfterApplyAndReplaysDuplicates) {
     EXPECT_TRUE(LocalCluster::eventually(
         [&] { return cluster.node(id).status().commit >= acks.back().index; }));
   }
+}
+
+TEST(Gateway, FollowerRedirectsToTheLeaderWithoutSubmitting) {
+  LocalCluster cluster(3);
+  ASSERT_TRUE(LocalCluster::eventually([&] {
+    const auto leader = cluster.leader();
+    return leader &&
+           cluster.node(leader.value_or(1) % 3 + 1).status().leader == leader.value_or(0) &&
+           cluster.node(leader.value_or(1)).status().commit != 0;
+  }));
+  const std::uint32_t leader = cluster.leader().value_or(1);
+  const std::uint64_t commit = cluster.node(leader).status().commit;
+  Wire wire(cluster.client_port(leader % 3 + 1));
+  wire.submit(codec::encode_register(1));
+  const auto [type, body] = wire.next_frame();
+  ASSERT_EQ(type, static_cast<std::uint16_t>(FrameType::kRedirect));
+  EXPECT_EQ(decode_redirect(body), Redirect{.leader = leader});
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  EXPECT_EQ(cluster.node(leader).status().commit, commit);
+}
+
+TEST(Protocol, RedirectRoundTripsAndRejectsNonzeroPadding) {
+  std::vector<std::byte> frame;
+  encode_redirect(Redirect{.leader = 3}, frame);
+  std::vector<std::byte> body(frame.begin() + sizeof(io::FrameHeader), frame.end());
+  EXPECT_EQ(decode_redirect(body), Redirect{.leader = 3});
+  body[4] = std::byte{1};
+  EXPECT_FALSE(decode_redirect(body).has_value());
 }
 
 TEST(Protocol, AckRoundTripsAndRejectsMalformedBodies) {
