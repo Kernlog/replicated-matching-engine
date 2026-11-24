@@ -100,8 +100,8 @@ std::size_t holders(const std::vector<Replayed>& nodes, std::uint64_t session, s
     const auto found = node.applied.find({session, seq});
     count += found != node.applied.end() && (index == 0 || found->second.front().index == index) &&
                      found->second.front().digest == digest
-                 ? 1
-                 : 0;
+                 ? 1U
+                 : 0U;
   }
   return count;
 }
