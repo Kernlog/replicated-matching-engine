@@ -88,7 +88,7 @@ the longest gap between consecutive acks is the client-visible unavailability. E
 |---|---|---|---|---|
 | 142 ms | 183 ms | 682 ms | 682 ms | 151 ms |
 
-99 of 100 runs recovered within 200 ms; one took 682 ms.
+The slowest of the 100 runs took 682 ms.
 
 ## Thread pinning
 
