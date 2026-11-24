@@ -98,9 +98,14 @@ class LocalCluster {
     gateways_[id - 1]->start(*nodes_[id - 1]);
   }
 
+  // The gateway's thread stops first so nothing calls into the node, then the node, whose core
+  // may still hand the gateway acks, and only then the gateway object.
   void stop(std::uint32_t id) {
-    gateways_[id - 1].reset();
+    if (gateways_[id - 1]) {
+      gateways_[id - 1]->stop();
+    }
     nodes_[id - 1].reset();
+    gateways_[id - 1].reset();
   }
 
   [[nodiscard]] std::uint16_t client_port(std::uint32_t id) const { return client_ports_[id - 1]; }

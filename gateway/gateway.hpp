@@ -36,6 +36,10 @@ class Gateway {
   void stop();
 
   [[nodiscard]] std::uint16_t port() const;
+  // Acks dropped because the gateway was not draining them.
+  [[nodiscard]] std::uint64_t dropped_acks() const noexcept {
+    return dropped_acks_.load(std::memory_order_relaxed);
+  }
 
  private:
   struct Connection;
@@ -52,6 +56,7 @@ class Gateway {
   node::Node* node_ = nullptr;
   SpscQueue<Ack> acks_{8192};
   alignas(kFalseSharingRange) std::atomic<bool> drain_posted_{false};
+  std::atomic<std::uint64_t> dropped_acks_{0};
   std::map<std::uint64_t, std::weak_ptr<Connection>> registering_;
   std::map<std::uint64_t, std::weak_ptr<Connection>> sessions_;
   std::jthread thread_;

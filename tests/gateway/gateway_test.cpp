@@ -107,6 +107,19 @@ TEST(Gateway, FollowerRedirectsToTheLeaderWithoutSubmitting) {
   EXPECT_EQ(cluster.node(leader).status().commit, commit);
 }
 
+// A stopped gateway drains nothing; the core must keep going instead of spinning on a full ring.
+TEST(Gateway, StoppedGatewayDropsAcksInsteadOfBlockingTheCore) {
+  Gateway gateway("127.0.0.1", 0);
+  const node::Node::OutcomeHandler handler = gateway.outcome_handler();
+  constexpr std::uint64_t kOutcomes = 20'000;
+  for (std::uint64_t i = 1; i <= kOutcomes; ++i) {
+    handler(i, engine::Outcome{
+                   .client = 1, .seq = i, .result = engine::SessionResult::kApplied, .events = {}});
+  }
+  EXPECT_GT(gateway.dropped_acks(), 0U);
+  EXPECT_LT(gateway.dropped_acks(), kOutcomes);
+}
+
 TEST(Protocol, RedirectRoundTripsAndRejectsNonzeroPadding) {
   std::vector<std::byte> frame;
   encode_redirect(Redirect{.leader = 3}, frame);
