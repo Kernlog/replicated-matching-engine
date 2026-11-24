@@ -27,7 +27,7 @@ ClientOptions options(LocalCluster& cluster, std::uint64_t nonce) {
 TEST(Client, FollowsRedirectsAndSurvivesLeaderLossWithEachSeqAppliedOnce) {
   LocalCluster cluster(3);
   ASSERT_TRUE(LocalCluster::eventually([&] { return cluster.leader().has_value(); }));
-  const std::uint32_t first_leader = *cluster.leader();
+  const std::uint32_t first_leader = cluster.leader().value_or(1);
   ClientOptions opts = options(cluster, 11);
   opts.first = first_leader - 1;
   Client client(opts);
@@ -63,9 +63,9 @@ TEST(Client, StartsAtAFollowerAndIsRedirected) {
   LocalCluster cluster(3);
   ASSERT_TRUE(LocalCluster::eventually([&] {
     const auto leader = cluster.leader();
-    return leader && cluster.node(*leader % 3 + 1).status().leader == *leader;
+    return leader && cluster.node(leader.value_or(1) % 3 + 1).status().leader == leader.value_or(0);
   }));
-  const std::uint32_t leader = *cluster.leader();
+  const std::uint32_t leader = cluster.leader().value_or(1);
   ClientOptions opts = options(cluster, 12);
   opts.first = leader % 3;
   Client client(opts);

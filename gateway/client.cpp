@@ -98,25 +98,8 @@ Client::Reply Client::await_reply(std::uint64_t client, std::uint64_t seq, Ack& 
   const auto deadline = std::chrono::steady_clock::now() + options_.attempt_timeout;
   for (;;) {
     while (const std::optional<io::Frame> frame = decoder_.next()) {
-      if (frame->type == static_cast<std::uint16_t>(FrameType::kRedirect)) {
-        const std::optional<Redirect> redirect = decode_redirect(frame->body);
-        if (!redirect) {
-          return Reply::kBroken;
-        }
-        leader = redirect->leader;
-        return Reply::kRedirect;
-      }
-      std::optional<Ack> got = frame->type == static_cast<std::uint16_t>(FrameType::kAck)
-                                   ? decode_ack(frame->body)
-                                   : std::nullopt;
-      if (!got) {
-        return Reply::kBroken;
-      }
-      const bool registered =
-          client == engine::kRegisterClient && got->result == engine::SessionResult::kRegistered;
-      if (got->seq == seq && (registered || got->client == client)) {
-        ack = std::move(*got);
-        return Reply::kAck;
+      if (const std::optional<Reply> reply = classify(*frame, client, seq, ack, leader)) {
+        return *reply;
       }
     }
     if (decoder_.error() != io::FrameError::kNone) {
@@ -143,6 +126,28 @@ Client::Reply Client::await_reply(std::uint64_t client, std::uint64_t seq, Ack& 
     }
     decoder_.commit(read);
   }
+}
+
+std::optional<Client::Reply> Client::classify(const io::Frame& frame, std::uint64_t client,
+                                              std::uint64_t seq, Ack& ack, std::uint32_t& leader) {
+  if (frame.type == static_cast<std::uint16_t>(FrameType::kRedirect)) {
+    const std::optional<Redirect> redirect = decode_redirect(frame.body);
+    leader = redirect.value_or(Redirect{}).leader;
+    return redirect ? Reply::kRedirect : Reply::kBroken;
+  }
+  std::optional<Ack> got = frame.type == static_cast<std::uint16_t>(FrameType::kAck)
+                               ? decode_ack(frame.body)
+                               : std::nullopt;
+  if (!got) {
+    return Reply::kBroken;
+  }
+  const bool registered =
+      client == engine::kRegisterClient && got->result == engine::SessionResult::kRegistered;
+  if (got->seq == seq && (registered || got->client == client)) {
+    ack = std::move(*got);
+    return Reply::kAck;
+  }
+  return std::nullopt;
 }
 
 void Client::move_on(std::optional<std::uint32_t> leader) {

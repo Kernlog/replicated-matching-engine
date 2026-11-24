@@ -56,6 +56,8 @@ class Client {
   Ack until_acked(const codec::ClientRecordBytes& record, std::uint64_t client, std::uint64_t seq);
   bool connect();
   Reply await_reply(std::uint64_t client, std::uint64_t seq, Ack& ack, std::uint32_t& leader);
+  static std::optional<Reply> classify(const io::Frame& frame, std::uint64_t client,
+                                       std::uint64_t seq, Ack& ack, std::uint32_t& leader);
   void move_on(std::optional<std::uint32_t> leader);
 
   ClientOptions options_;
