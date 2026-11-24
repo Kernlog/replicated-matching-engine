@@ -51,6 +51,7 @@ class Node {
  public:
   using OutcomeHandler = std::function<void(std::uint64_t index, const engine::Outcome&)>;
   using EntryHandler = std::function<void(const consensus::Entry&)>;
+  using SnapshotHandler = std::function<void(std::uint64_t applied, std::vector<std::byte> image)>;
 
   Node(NodeConfig config, OutcomeHandler on_outcome = {});
   Node(const Node&) = delete;
@@ -68,6 +69,10 @@ class Node {
 
   // From one client-facing thread: a command record for the leader to replicate.
   void submit(std::vector<std::byte> command) noexcept;
+
+  // From the client-facing thread: done runs on the core thread with the replica image, between
+  // two applies, so whatever the core publishes alongside is consistent with it.
+  void request_snapshot(SnapshotHandler done) noexcept;
 
   [[nodiscard]] NodeStatus status() const noexcept;
   [[nodiscard]] std::uint16_t port() const { return transport_.port(); }
@@ -98,6 +103,7 @@ class Node {
   consensus::Raft raft_;
   SpscQueue<consensus::Message> inbox_{8192};
   SpscQueue<std::vector<std::byte>> commands_{8192};
+  SpscQueue<SnapshotHandler> snapshots_{64};
   io::Transport transport_;
   std::optional<io::StorageThread> storage_thread_;
   std::deque<Held> held_;

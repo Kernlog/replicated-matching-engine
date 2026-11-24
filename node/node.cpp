@@ -87,6 +87,10 @@ void Node::submit(std::vector<std::byte> command) noexcept {
   commands_.push(std::move(command));
 }
 
+void Node::request_snapshot(SnapshotHandler done) noexcept {
+  snapshots_.push(std::move(done));
+}
+
 NodeStatus Node::status() const noexcept {
   return NodeStatus{.role = published_.role.load(std::memory_order_relaxed),
                     .term = published_.term.load(std::memory_order_relaxed),
@@ -107,6 +111,10 @@ void Node::run(const std::stop_token& stop) {
       busy = true;
     }
     busy = propose_commands() || busy;
+    while (std::optional<SnapshotHandler> done = snapshots_.try_pop()) {
+      (*done)(replica_.applied_index(), replica_.snapshot());
+      busy = true;
+    }
     if (const auto now = Clock::now(); now >= next_tick) {
       raft_.tick();
       next_tick = std::max(next_tick + config_.tick, now);
