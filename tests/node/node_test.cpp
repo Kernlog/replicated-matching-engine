@@ -182,6 +182,11 @@ TEST(Node, FeedSeqsSurviveSnapshotsAndRestarts) {
   testing::CommandStream stream(8);
   submit_commands(cluster, leader, session, 1, 200, stream);
   ASSERT_TRUE(LocalCluster::eventually([&] { return converged(cluster, 3); }));
+  std::size_t before_stop = 0;
+  {
+    const std::scoped_lock lock(mutex);
+    before_stop = seqs.at(follower - 1).size();
+  }
   cluster.stop(follower);
   submit_commands(cluster, leader, session, 201, 400, stream);
   ASSERT_TRUE(
@@ -197,7 +202,11 @@ TEST(Node, FeedSeqsSurviveSnapshotsAndRestarts) {
     }
   }
   EXPECT_GT(shared, 20U) << "follower " << follower << " saw " << seqs.at(follower - 1).size()
-                         << ", leader " << leader << " saw " << seqs.at(leader - 1).size();
+                         << " (" << before_stop << " before stopping, keys "
+                         << seqs.at(follower - 1).begin()->first << ".."
+                         << seqs.at(follower - 1).rbegin()->first << "), leader " << leader
+                         << " saw " << seqs.at(leader - 1).size() << " applied "
+                         << cluster.node(leader).status().applied;
 }
 
 }  // namespace
