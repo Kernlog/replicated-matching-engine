@@ -78,8 +78,10 @@ void work(std::uint32_t worker, const std::vector<rme::gateway::Endpoint>& membe
     ++seq;
     try {
       const rme::gateway::Ack ack = client.submit(stream.next());
-      history.record(worker, client.session(), seq, start, Clock::now(), "ok", ack.index,
-                     events_digest(ack.events));
+      // A duplicate's ack carries the index of the resend, not of the original execution.
+      const bool duplicate = ack.result == rme::engine::SessionResult::kDuplicate;
+      history.record(worker, client.session(), seq, start, Clock::now(), duplicate ? "dup" : "ok",
+                     ack.index, events_digest(ack.events));
     } catch (const std::exception& error) {
       history.record(worker, client.session(), seq, start, Clock::now(), "info", 0, 0);
       return;
