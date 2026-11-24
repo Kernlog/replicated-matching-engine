@@ -41,9 +41,9 @@ class LossyRelay {
     address.sin_port = htons(to);
     thread_ = std::jthread([this, address, drop_percent](const std::stop_token& stop) {
       Rng rng(5);
-      std::array<std::byte, 2048> buffer{};
+      std::array<std::byte, 2048> datagram{};
       while (!stop.stop_requested()) {
-        const ssize_t n = ::recv(in_, buffer.data(), buffer.size(), 0);
+        const ssize_t n = ::recv(in_, datagram.data(), datagram.size(), 0);
         if (n <= 0) {
           continue;
         }
@@ -52,7 +52,7 @@ class LossyRelay {
           ++dropped_;
           continue;
         }
-        ::sendto(in_, buffer.data(), static_cast<std::size_t>(n), 0,
+        ::sendto(in_, datagram.data(), static_cast<std::size_t>(n), 0,
                  reinterpret_cast<const sockaddr*>(&address),  // NOLINT(*-reinterpret-cast)
                  sizeof address);
       }
