@@ -48,6 +48,8 @@ class Client {
   Ack submit(const engine::Command& command);
 
   [[nodiscard]] std::uint64_t session() const noexcept { return session_; }
+  // The member the last ack came from.
+  [[nodiscard]] std::size_t target() const noexcept { return target_; }
   [[nodiscard]] const ClientStats& stats() const noexcept { return stats_; }
 
  private:

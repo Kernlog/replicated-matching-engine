@@ -6,6 +6,7 @@
     "asio",
     "cli11",
     "gtest",
+    "hdr-histogram",
     "spdlog"
   ],
   "features": {
