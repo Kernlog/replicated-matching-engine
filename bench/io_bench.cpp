@@ -1,15 +1,19 @@
 #include <benchmark/benchmark.h>
 #include <unistd.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "consensus/types.hpp"
 #include "io/disk_storage.hpp"
 #include "io/storage_thread.hpp"
+#include "io/transport.hpp"
 
 namespace {
 
@@ -82,8 +86,60 @@ void group_commit(benchmark::State& state) {
   report(state, kEntries, syncs);
 }
 
+rme::consensus::Message append(std::uint64_t index) {
+  return rme::consensus::Message{
+      rme::consensus::NodeId(1), rme::consensus::NodeId(2), Term(1),
+      rme::consensus::AppendRequest{Index(index - 1), Term(1), {entry(index)}, Index(0)}};
+}
+
+// Frames from one node to another over loopback, flushed in batches of 64 as a Ready would be.
+void transport_stream(benchmark::State& state) {
+  constexpr std::uint64_t kMessages = 100'000;
+  constexpr std::uint64_t kWindow = 2048;
+  std::atomic<std::uint64_t> received{0};
+  rme::io::Transport receiver(rme::consensus::NodeId(2), "127.0.0.1", 0,
+                              [&received](const rme::consensus::Message&) {
+                                received.fetch_add(1, std::memory_order_relaxed);
+                              });
+  receiver.start();
+  rme::io::Transport sender(rme::consensus::NodeId(1), "127.0.0.1", 0,
+                            [](const rme::consensus::Message&) {});
+  sender.add_peer({rme::consensus::NodeId(2), "127.0.0.1", receiver.port()});
+  sender.start();
+  while (received.load() == 0) {
+    sender.send(append(1));
+    sender.flush();
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  std::uint64_t sent = 0;
+  for (auto _ : state) {
+    const std::uint64_t start = received.load();
+    for (std::uint64_t i = 0; i < kMessages; ++i) {
+      while (sent - (received.load(std::memory_order_relaxed) - start) >= kWindow) {
+        std::this_thread::yield();
+      }
+      sender.send(append(2 + i));
+      ++sent;
+      if (i % 64 == 63) {
+        sender.flush();
+      }
+    }
+    sender.flush();
+    while (received.load() - start < kMessages) {
+      std::this_thread::yield();
+    }
+    sent = 0;
+  }
+  sender.stop();
+  const rme::io::TransportStats& stats = sender.stats();
+  state.SetItemsProcessed(state.iterations() * static_cast<std::int64_t>(kMessages));
+  state.counters["writes_per_kframe"] =
+      1000.0 * static_cast<double>(stats.writes) / static_cast<double>(stats.frames_sent);
+}
+
 }  // namespace
 
+BENCHMARK(transport_stream)->Unit(benchmark::kMillisecond)->UseRealTime()->Iterations(3);
 BENCHMARK(sync_per_entry)->Unit(benchmark::kMillisecond)->UseRealTime()->Iterations(2);
 BENCHMARK(group_commit)->Unit(benchmark::kMillisecond)->UseRealTime()->Iterations(2);
 
