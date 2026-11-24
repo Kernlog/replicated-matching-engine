@@ -42,12 +42,16 @@ def one_run(seed):
                 [BIN / "node/rme_node", f"--id={i}", f"--data-dir={work / str(i)}",
                  "--listen=127.0.0.1", f"--client-port={base + 10 + i}", *members],
                 stdout=open(logs[i], "w"), stderr=subprocess.STDOUT)
-        time.sleep(1.0)
+        deadline = time.monotonic() + 5
+        while leader_of(logs) is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if leader_of(logs) is None:
+            raise RuntimeError("no leader elected: " + logs[1].read_text()[-500:])
         history = work / "history.tsv"
         client = subprocess.Popen(
             [BIN / "tools/chaos_client", "--workers=1", "--seconds=3", f"--out={history}",
              *[f"--member=127.0.0.1:{base + 10 + i}" for i in (1, 2, 3)]])
-        time.sleep(1.2)
+        time.sleep(1.0)
         leader = leader_of(logs)
         procs[leader].send_signal(signal.SIGKILL)
         client.wait(timeout=60)
