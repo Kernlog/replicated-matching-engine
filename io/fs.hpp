@@ -3,10 +3,12 @@
 #include <sys/types.h>
 #include <sys/uio.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace rme::io {
 
@@ -21,6 +23,9 @@ void sync_dir(const std::filesystem::path& dir);
 
 // Reserves blocks so later writes never change the file size and fdatasync skips the inode.
 void preallocate(int fd, std::uint64_t bytes);
+
+// Reads the whole file with sequential readahead.
+[[nodiscard]] std::vector<std::byte> read_file(const std::filesystem::path& path);
 
 // Writes every byte the iovecs describe at offset, retrying short writes. Consumes iov.
 void pwritev_all(int fd, std::span<iovec> iov, off_t offset);

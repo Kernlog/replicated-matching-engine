@@ -19,7 +19,6 @@ namespace rme::io {
 namespace {
 
 constexpr std::size_t kMaxStaged = 512;
-constexpr std::size_t kReadBytes = std::size_t{1} << 20U;
 constexpr std::array<std::byte, 8> kZeros{};
 constexpr std::string_view kSuffix = ".wal";
 
@@ -41,25 +40,6 @@ RecordHeader make_header(RecordKind kind, consensus::Term term, consensus::Index
 
 constexpr std::uint64_t record_bytes(std::size_t length) noexcept {
   return sizeof(RecordHeader) + padded(length);
-}
-
-std::vector<std::byte> read_file(const std::filesystem::path& path) {
-  const log::File file(path, O_RDONLY);
-  ::posix_fadvise(file.fd(), 0, 0, POSIX_FADV_SEQUENTIAL);
-  std::vector<std::byte> data(std::filesystem::file_size(path));
-  std::size_t at = 0;
-  while (at < data.size()) {
-    const ssize_t n = ::pread(file.fd(), &data[at], std::min(kReadBytes, data.size() - at),
-                              static_cast<off_t>(at));
-    if (n < 0 && errno == EINTR) {
-      continue;
-    }
-    if (n <= 0) {
-      throw_errno("read " + path.string());
-    }
-    at += static_cast<std::size_t>(n);
-  }
-  return data;
 }
 
 [[noreturn]] void corrupt(const std::filesystem::path& path, std::uint64_t offset) {
