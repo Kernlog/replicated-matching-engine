@@ -38,7 +38,7 @@ class UdpSink {
 
   [[nodiscard]] std::uint16_t port() const noexcept { return port_; }
 
-  std::optional<std::vector<Message>> next() {
+  [[nodiscard]] std::optional<std::vector<Message>> next() const {
     std::array<std::byte, 2048> buffer{};
     const ssize_t n = ::recv(fd_, buffer.data(), buffer.size(), 0);
     if (n <= 0) {
