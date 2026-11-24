@@ -24,12 +24,11 @@ inline std::uint16_t free_port() {
   sockaddr_in address{};
   address.sin_family = AF_INET;
   address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  static_cast<void>(::bind(fd, reinterpret_cast<sockaddr*>(&address),
-                           sizeof address));  // NOLINT(*-reinterpret-cast)
+  auto* raw = reinterpret_cast<sockaddr*>(&address);  // NOLINT(*-reinterpret-cast)
   socklen_t size = sizeof address;
-  ::getsockname(fd, reinterpret_cast<sockaddr*>(&address), &size);  // NOLINT(*-reinterpret-cast)
+  const bool bound = ::bind(fd, raw, sizeof address) == 0 && ::getsockname(fd, raw, &size) == 0;
   ::close(fd);
-  return ntohs(address.sin_port);
+  return bound ? ntohs(address.sin_port) : 0;
 }
 
 struct Recorded {
