@@ -72,7 +72,7 @@ func main() {
 	}
 	// An unanswered command may take effect any time after it was sent.
 	for i := range ops {
-		if !ops[i].Output.(output).known {
+		if unanswered[i] {
 			ops[i].Return = end + 1
 		}
 	}

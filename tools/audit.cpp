@@ -98,7 +98,7 @@ std::size_t holders(const std::vector<Replayed>& nodes, std::uint64_t session, s
   std::size_t count = 0;
   for (const Replayed& node : nodes) {
     const auto found = node.applied.find({session, seq});
-    count += found != node.applied.end() && found->second.front().index == index &&
+    count += found != node.applied.end() && (index == 0 || found->second.front().index == index) &&
                      found->second.front().digest == digest
                  ? 1
                  : 0;
@@ -122,9 +122,12 @@ Counts check_acks(const std::string& path, const std::vector<Replayed>& nodes,
     std::uint64_t index = 0;
     std::uint64_t digest = 0;
     fields >> worker >> session >> seq >> start >> end >> outcome >> index >> digest;
-    if (outcome != "ok") {
+    if (outcome != "ok" && outcome != "dup") {
       ++counts.indeterminate;
       continue;
+    }
+    if (outcome == "dup") {
+      index = 0;
     }
     ++counts.acked;
     if (const std::size_t held = holders(nodes, session, seq, index, digest);
