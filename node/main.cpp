@@ -1,6 +1,7 @@
 #include <chrono>
 #include <exception>
 #include <iostream>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -23,7 +24,8 @@ rme::io::PeerAddress parse_member(std::uint32_t id, std::string_view text) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  const std::vector<std::string_view> args(argv, argv + argc);
+  const std::span<char*> raw(argv, static_cast<std::size_t>(argc));
+  const std::vector<std::string_view> args(raw.begin(), raw.end());
   if (args.size() < 4) {
     std::cerr << "usage: rme_node <id> <data-dir> <host:port>...\n";
     return 2;
@@ -43,7 +45,8 @@ int main(int argc, char** argv) {
       const rme::node::NodeStatus status = node.status();
       std::cout << "role=" << static_cast<int>(status.role) << " term=" << status.term
                 << " leader=" << status.leader << " commit=" << status.commit
-                << " applied=" << status.applied << std::endl;
+                << " applied=" << status.applied << '\n'
+                << std::flush;
     }
   } catch (const std::exception& error) {
     std::cerr << "rme_node: " << error.what() << '\n';
