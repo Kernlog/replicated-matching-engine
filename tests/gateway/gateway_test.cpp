@@ -92,7 +92,9 @@ TEST(Gateway, FollowerRedirectsToTheLeaderWithoutSubmitting) {
   LocalCluster cluster(3);
   ASSERT_TRUE(LocalCluster::eventually([&] {
     const auto leader = cluster.leader();
-    return leader && cluster.node(leader.value_or(1) % 3 + 1).status().leader == leader.value_or(0);
+    return leader &&
+           cluster.node(leader.value_or(1) % 3 + 1).status().leader == leader.value_or(0) &&
+           cluster.node(leader.value_or(1)).status().commit != 0;
   }));
   const std::uint32_t leader = cluster.leader().value_or(1);
   const std::uint64_t commit = cluster.node(leader).status().commit;

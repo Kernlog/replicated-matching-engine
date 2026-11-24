@@ -41,19 +41,19 @@ TEST(Client, FollowsRedirectsAndSurvivesLeaderLossWithEachSeqAppliedOnce) {
     client.submit(stream.next());
   }
   const std::uint32_t survivor = first_leader % 3 + 1;
-  ASSERT_TRUE(LocalCluster::eventually([&] {
-    return cluster.node(survivor).status().applied >= cluster.node(survivor).status().commit;
-  }));
-  EXPECT_EQ(client.stats().redirects + client.stats().timeouts + client.stats().reconnects > 1,
-            true);
   std::map<std::uint64_t, int> applied;
-  for (const node::Recorded& recorded : cluster.outcomes(survivor)) {
-    if (recorded.outcome.client == client.session() &&
-        recorded.outcome.result == engine::SessionResult::kApplied) {
-      ++applied[recorded.outcome.seq];
+  const auto count_applied = [&] {
+    applied.clear();
+    for (const node::Recorded& recorded : cluster.outcomes(survivor)) {
+      if (recorded.outcome.client == client.session() &&
+          recorded.outcome.result == engine::SessionResult::kApplied) {
+        ++applied[recorded.outcome.seq];
+      }
     }
-  }
-  EXPECT_EQ(applied.size(), 200U);
+    return applied.size() == 200;
+  };
+  EXPECT_TRUE(LocalCluster::eventually(count_applied));
+  EXPECT_GT(client.stats().reconnects, 1U);
   for (const auto& [seq, count] : applied) {
     EXPECT_EQ(count, 1) << seq;
   }
