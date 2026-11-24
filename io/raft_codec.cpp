@@ -23,23 +23,23 @@ using consensus::VoteResponse;
 
 class Writer {
  public:
-  explicit Writer(std::vector<std::byte>& out) : out_(out) {}
+  explicit Writer(std::vector<std::byte>& out) : out_(&out) {}
 
   template <typename T>
     requires std::is_trivially_copyable_v<T>
   void put(T value) {
-    const std::size_t at = out_.size();
-    out_.resize(at + sizeof value);
-    std::memcpy(&out_[at], &value, sizeof value);
+    const std::size_t at = out_->size();
+    out_->resize(at + sizeof value);
+    std::memcpy(&(*out_)[at], &value, sizeof value);
   }
 
   void put_bytes(std::span<const std::byte> bytes) {
     put(static_cast<std::uint32_t>(bytes.size()));
-    out_.insert(out_.end(), bytes.begin(), bytes.end());
+    out_->insert(out_->end(), bytes.begin(), bytes.end());
   }
 
  private:
-  std::vector<std::byte>& out_;
+  std::vector<std::byte>* out_;
 };
 
 class Reader {

@@ -88,7 +88,7 @@ TEST(Transport, EveryNodeDeliversToEveryPeerInOrder) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
     bool all = true;
     for (Node& node : nodes) {
-      std::vector<Message> got = node.inbox.take();
+      const std::vector<Message> got = node.inbox.take();
       std::vector<bool> from(kNodes + 1, false);
       for (const Message& message : got) {
         from[message.from.value()] = true;
@@ -127,7 +127,7 @@ TEST(Transport, ReconnectsAfterThePeerRestarts) {
       NodeId(2), "127.0.0.1", 0, [&inbox](Message&& message) { inbox.push(std::move(message)); });
   const std::uint16_t port = receiver->port();
   receiver->start();
-  Transport sender(NodeId(1), "127.0.0.1", 0, [](Message&&) {});
+  Transport sender(NodeId(1), "127.0.0.1", 0, [](const Message&) {});
   sender.add_peer({NodeId(2), "127.0.0.1", port});
   sender.start();
   const auto deliver = [&] {
@@ -155,7 +155,7 @@ TEST(Transport, DropsMessagesAddressedToAnotherNode) {
   Transport receiver(NodeId(2), "127.0.0.1", 0,
                      [&inbox](Message&& message) { inbox.push(std::move(message)); });
   receiver.start();
-  Transport sender(NodeId(1), "127.0.0.1", 0, [](Message&&) {});
+  Transport sender(NodeId(1), "127.0.0.1", 0, [](const Message&) {});
   sender.add_peer({NodeId(2), "127.0.0.1", receiver.port()});
   sender.add_peer({NodeId(3), "127.0.0.1", receiver.port()});
   sender.start();
