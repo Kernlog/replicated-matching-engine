@@ -111,10 +111,15 @@ TEST(Recovery, SubscriberRebuildsTheLeadersBookThroughFivePercentLoss) {
     const node::NodeStatus status = cluster.node(1).status();
     return status.applied != 0 && status.applied == status.commit;
   }));
-  const std::uint64_t target = cluster.node(1).status().applied;
-  ASSERT_TRUE(subscriber->run_until(target, std::chrono::seconds(20)));
-  ASSERT_TRUE(LocalCluster::eventually(
-      [&] { return cluster.node(1).status().replica_hash == subscriber->hash(); }));
+  // A leader change appends a no-op after the last command, so follow node 1 until both sides
+  // stop at the same index.
+  std::uint64_t target = 0;
+  ASSERT_TRUE(LocalCluster::eventually([&] {
+    target = cluster.node(1).status().applied;
+    return subscriber->run_until(target, std::chrono::milliseconds(500)) &&
+           cluster.node(1).status().applied == subscriber->applied() &&
+           cluster.node(1).status().replica_hash == subscriber->hash();
+  }));
   EXPECT_GT(relay->dropped(), 0U);
   EXPECT_GE(subscriber->stats().recoveries, 1U);
   std::cout << "packets " << relay->received() << " dropped " << relay->dropped() << " recoveries "
