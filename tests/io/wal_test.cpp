@@ -145,5 +145,54 @@ TEST(Wal, RejectsAGapInIndices) {
   EXPECT_THROW(Wal{dir.path()}, std::runtime_error);
 }
 
+TEST(Wal, ReleasesSegmentsWhollyBehindTheSnapshotMark) {
+  const TempDir dir;
+  const WalOptions options{.segment_bytes = 4096};
+  {
+    Wal wal(dir.path(), options);
+    wal.append(run(1, 1, 300));
+    wal.sync();
+    const std::size_t before = segment_count(dir.path());
+    wal.mark_snapshot(Index(250), Term(1));
+    wal.sync();
+    EXPECT_GT(wal.stats().segments_removed, 0U);
+    EXPECT_EQ(segment_count(dir.path()), before - wal.stats().segments_removed);
+  }
+  Wal wal(dir.path(), options);
+  EXPECT_EQ(wal.mark_index(), Index(250));
+  EXPECT_EQ(wal.take_entries(), run(1, 251, 300));
+}
+
+// Replay keeps the entries after a mark only if it still finds the mark's own entry, so release
+// must keep that entry even when it is the last one in its segment.
+TEST(Wal, ReleaseKeepsTheEntryAtTheMarkWhereverItFalls) {
+  for (std::uint64_t mark = 180; mark <= 260; ++mark) {
+    const TempDir dir;
+    const WalOptions options{.segment_bytes = 4096};
+    {
+      Wal wal(dir.path(), options);
+      wal.append(run(1, 1, 300));
+      wal.mark_snapshot(Index(mark), Term(1));
+      wal.sync();
+    }
+    Wal wal(dir.path(), options);
+    EXPECT_EQ(wal.take_entries(), run(1, mark + 1, 300)) << "mark " << mark;
+  }
+}
+
+TEST(Wal, KeepsSegmentsThatStillHoldEntriesPastTheMark) {
+  const TempDir dir;
+  const WalOptions options{.segment_bytes = 4096};
+  {
+    Wal wal(dir.path(), options);
+    wal.append(run(1, 1, 300));
+    wal.mark_snapshot(Index(10), Term(1));
+    wal.sync();
+    EXPECT_EQ(wal.stats().segments_removed, 0U);
+  }
+  Wal wal(dir.path(), options);
+  EXPECT_EQ(wal.take_entries(), run(1, 11, 300));
+}
+
 }  // namespace
 }  // namespace rme::io

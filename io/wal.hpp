@@ -40,6 +40,7 @@ struct WalStats {
   std::uint64_t writes = 0;
   std::uint64_t syncs = 0;
   std::uint64_t bytes = 0;
+  std::uint64_t segments_removed = 0;
 };
 
 // Write-ahead log of Raft entries in preallocated segment files. A record whose index is at or
@@ -78,6 +79,7 @@ class Wal {
   void stage(const RecordHeader& header, std::span<const std::byte> body);
   void flush();
   void roll();
+  void release();
   log::File& current() noexcept;
 
   std::filesystem::path dir_;
@@ -85,6 +87,16 @@ class Wal {
   std::optional<log::File> current_;
   std::uint64_t sequence_ = 0;
   std::vector<log::File> unsynced_;
+  // Closed segments, oldest first, with the highest entry index each holds.
+  struct Closed {
+    std::uint64_t sequence = 0;
+    std::uint64_t last_index = 0;
+  };
+  std::vector<Closed> closed_;
+  std::uint64_t last_index_ = 0;
+  std::uint64_t mark_sequence_ = 0;
+  // The first segment was released, so replay starts partway through the history.
+  bool released_ = false;
   std::uint64_t offset_ = 0;
   std::uint64_t staged_bytes_ = 0;
   std::vector<RecordHeader> headers_;
