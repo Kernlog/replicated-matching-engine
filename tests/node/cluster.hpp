@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -50,12 +51,28 @@ class LocalCluster {
         outcomes_(size),
         gateways_(size),
         nodes_(size) {
-    for (std::uint32_t id = 1; id <= size; ++id) {
-      members_.push_back({consensus::NodeId(id), "127.0.0.1", free_port()});
-      client_ports_.push_back(free_port());
-    }
-    for (std::uint32_t id = 1; id <= size; ++id) {
-      start(id);
+    // A port handed out and released can be taken by a test running in parallel before a node
+    // binds it, so a clash picks fresh ports and starts over.
+    for (int attempt = 0;; ++attempt) {
+      members_.clear();
+      client_ports_.clear();
+      for (std::uint32_t id = 1; id <= size; ++id) {
+        members_.push_back({consensus::NodeId(id), "127.0.0.1", free_port()});
+        client_ports_.push_back(free_port());
+      }
+      try {
+        for (std::uint32_t id = 1; id <= size; ++id) {
+          start(id);
+        }
+        return;
+      } catch (const std::system_error& error) {
+        if (error.code() != std::errc::address_in_use || attempt == 9) {
+          throw;
+        }
+        for (std::uint32_t id = 1; id <= size; ++id) {
+          stop(id);
+        }
+      }
     }
   }
 
