@@ -30,6 +30,23 @@ void StorageThread::submit(StorageWork&& work) noexcept {
   queue_.push(std::move(work));
 }
 
+void StorageThread::stage(const StorageWork& work, bool pending) {
+  if (work.state) {
+    storage_.save(*work.state);
+  }
+  if (work.snapshot) {
+    // DiskStorage writes a snapshot before the entries it holds, so earlier entries sync first.
+    if (pending) {
+      storage_.sync();
+      ++stats_.syncs;
+    }
+    storage_.save_snapshot(*work.snapshot);
+  }
+  if (!work.entries.empty()) {
+    storage_.append(work.entries);
+  }
+}
+
 void StorageThread::run() {
   std::vector<StorageWork> batch(kBatch);
   for (;;) {
@@ -44,19 +61,7 @@ void StorageThread::run() {
         stop = true;
         continue;
       }
-      if (work.state) {
-        storage_.save(*work.state);
-      }
-      if (work.snapshot) {
-        if (pending) {
-          storage_.sync();
-          ++stats_.syncs;
-        }
-        storage_.save_snapshot(*work.snapshot);
-      }
-      if (!work.entries.empty()) {
-        storage_.append(work.entries);
-      }
+      stage(work, pending);
       pending = true;
       last = work.seq;
       ++stats_.works;

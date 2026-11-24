@@ -78,7 +78,7 @@ TEST(StorageThread, HardStateAndSnapshotArriveInOrder) {
   const Durable durable = storage.take_recovered();
   EXPECT_EQ(durable.state.term, Term(4));
   ASSERT_TRUE(durable.snapshot.has_value());
-  EXPECT_EQ(durable.snapshot->index, Index(2));
+  EXPECT_EQ(durable.snapshot.value_or(consensus::Snapshot{}).index, Index(2));
   ASSERT_EQ(durable.log.size(), 1U);
   EXPECT_EQ(durable.log.front().index, Index(3));
 }

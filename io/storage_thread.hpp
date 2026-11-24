@@ -52,6 +52,7 @@ class StorageThread {
 
  private:
   void run();
+  void stage(const StorageWork& work, bool pending);
 
   DiskStorage& storage_;
   std::function<void()> on_synced_;
