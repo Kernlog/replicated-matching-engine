@@ -53,7 +53,7 @@ Every bug found by fuzzing, the simulator or chaos runs, with the seed that foun
 
 ## B-008: a stale leader commits over a newer term through a follower that lost its disk
 - Found by: nightly sim, seed 97276 (100,000-seed run; PreVote and CheckQuorum off, wipes on)
-- Symptom: node 1 applied a different entry at index 3079 than the committed one, and 17 client commands took effect twice, at 3079 and at 3081
+- Symptom: node 1 applied a different entry at index 3079 than the committed one, and 15 client commands took effect twice, at 3079 and at 3081
 - Root cause: a leader cut off in term 72 kept replicating. Nodes 2 and 3 committed term 73 entries at 3079-3082; then node 3's disk was wiped and node 2 crashed. Recovering node 3 could not vote, but it still acknowledged node 1's conflicting term-72 entries, and node 1 counted those acks toward a majority and committed over term 73's entries
 - Fix: a recovering node marks its AppendEntries acks as recovering; the leader keeps replicating to it but leaves its match out of the commit quorum until recovery ends
 - Regression: `RecoveryTest.StaleLeaderCannotCommitThroughARecoveringFollower` (commit index reaches 6 without the fix, stays at 4 with it), `RecoveryTest.RecoveringFollowerMarksItsAcks`; seed 97276 passes
