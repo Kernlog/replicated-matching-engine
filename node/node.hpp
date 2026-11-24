@@ -78,6 +78,7 @@ class Node {
   };
 
   void run(const std::stop_token& stop);
+  bool propose_commands();
   void handle_ready();
   bool release();
   void apply(const consensus::Entry& entry);
@@ -95,6 +96,7 @@ class Node {
   io::Transport transport_;
   std::optional<io::StorageThread> storage_thread_;
   std::deque<Held> held_;
+  std::optional<std::vector<std::byte>> deferred_;
   std::uint64_t seq_ = 0;
   bool sent_ = false;
   std::vector<engine::Outcome> outcomes_;

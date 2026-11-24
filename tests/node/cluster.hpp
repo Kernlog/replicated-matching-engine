@@ -57,6 +57,7 @@ class LocalCluster {
     config.data_dir = dirs_[id - 1].path();
     config.listen_host = "127.0.0.1";
     config.tick = std::chrono::milliseconds(5);
+    config.raft = raft_;
     auto& sink = outcomes_[id - 1];
     gateways_[id - 1] = std::make_unique<gateway::Gateway>("127.0.0.1", client_ports_[id - 1]);
     nodes_[id - 1] =
