@@ -28,9 +28,14 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      # Bench objects are built with -march=native, so a cache filled on one CPU model must not
+      # be restored on another: reused objects there die with an illegal instruction.
+      - id: cpu
+        shell: bash
+        run: echo "flags=$(grep -m1 '^flags' /proc/cpuinfo | sha256sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup
         with:
-          cache-key: clang-bench
+          cache-key: clang-bench-${{ steps.cpu.outputs.flags }}
       - name: build base and head
         run: |
           git worktree add "$RUNNER_TEMP/base" "$BASE_SHA"
