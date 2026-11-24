@@ -32,10 +32,9 @@ class Publisher {
   Publisher& operator=(Publisher&&) = delete;
   ~Publisher();
 
-  // Core thread, once per applied entry, in index order.
-  void publish(std::uint64_t index, std::span<const std::byte> data) noexcept;
-  // Core thread: the seq the next message will carry.
-  [[nodiscard]] std::uint64_t next_seq() const noexcept { return next_seq_; }
+  // Core thread, once per applied entry, in index order; first_seq numbers its first message.
+  void publish(std::uint64_t first_seq, std::uint64_t index,
+               std::span<const std::byte> data) noexcept;
 
   // Valid after stop.
   [[nodiscard]] const PublisherStats& stats() const noexcept { return stats_; }
@@ -49,7 +48,6 @@ class Publisher {
   sockaddr_in destination_{};
   SpscQueue<Message> queue_{std::size_t{1} << 16U};
   std::vector<Message> split_;
-  std::uint64_t next_seq_ = 1;
   std::uint64_t dropped_ = 0;
   PublisherStats stats_;
   std::jthread thread_;

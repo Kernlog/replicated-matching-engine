@@ -64,10 +64,9 @@ TEST(Publisher, SendsEveryRecordInSeqOrderInFullDatagrams) {
       const std::size_t records = index % 7;
       std::vector<std::byte> data(records * codec::kClientRecordSize,
                                   static_cast<std::byte>(index));
-      publisher.publish(index, data);
+      publisher.publish(expected_messages + 1, index, data);
       expected_messages += records == 0 ? 1 : records;
     }
-    EXPECT_EQ(publisher.next_seq(), expected_messages + 1);
     publisher.stop();
     stats = publisher.stats();
   }

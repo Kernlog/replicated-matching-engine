@@ -116,9 +116,9 @@ asio::awaitable<void> Gateway::serve(std::shared_ptr<Connection> connection) {
 
 void Gateway::on_snapshot_request(const std::shared_ptr<Connection>& connection) {
   node_->request_snapshot([this, weak = std::weak_ptr(connection)](std::uint64_t applied,
+                                                                   std::uint64_t next_seq,
                                                                    std::vector<std::byte> image) {
-    FeedSnapshot snapshot{
-        .applied = applied, .next_seq = next_seq_ ? next_seq_() : 0, .image = std::move(image)};
+    FeedSnapshot snapshot{.applied = applied, .next_seq = next_seq, .image = std::move(image)};
     asio::post(io_, [weak, snapshot = std::move(snapshot)] {
       if (const std::shared_ptr<Connection> alive = weak.lock(); alive && !alive->closed) {
         encode_snapshot(snapshot, alive->queued);

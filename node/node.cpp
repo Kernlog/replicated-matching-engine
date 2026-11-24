@@ -117,7 +117,7 @@ void Node::run(const std::stop_token& stop) {
     }
     busy = propose_commands() || busy;
     while (std::optional<SnapshotHandler> done = snapshots_.try_pop()) {
-      (*done)(replica_.applied_index(), replica_.snapshot());
+      (*done)(replica_.applied_index(), replica_.sequenced() + 1, replica_.snapshot());
       busy = true;
     }
     if (const auto now = Clock::now(); now >= next_tick) {
@@ -248,6 +248,7 @@ bool Node::release() {
 
 void Node::apply(const consensus::Entry& entry) {
   outcomes_.clear();
+  const std::uint64_t first_seq = replica_.sequenced() + 1;
   replica_.apply(entry.index.value(), entry.data, outcomes_);
   if (on_outcome_) {
     for (const engine::Outcome& outcome : outcomes_) {
@@ -255,7 +256,7 @@ void Node::apply(const consensus::Entry& entry) {
     }
   }
   if (on_entry_) {
-    on_entry_(entry);
+    on_entry_(entry, first_seq);
   }
 }
 

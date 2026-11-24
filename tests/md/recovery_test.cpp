@@ -91,10 +91,9 @@ TEST(Recovery, SubscriberRebuildsTheLeadersBookThroughFivePercentLoss) {
     subscriber = std::make_unique<Subscriber>(0, gateway::Endpoint{"127.0.0.1", gateway.port()});
     relay = std::make_unique<LossyRelay>(subscriber->port(), 5);
     publisher = std::make_unique<Publisher>("127.0.0.1", relay->port());
-    node.on_entry([&publisher](const consensus::Entry& entry) {
-      publisher->publish(entry.index.value(), entry.data);
+    node.on_entry([&publisher](const consensus::Entry& entry, std::uint64_t first_seq) {
+      publisher->publish(first_seq, entry.index.value(), entry.data);
     });
-    gateway.feed_seq([&publisher] { return publisher->next_seq(); });
   });
   ASSERT_TRUE(LocalCluster::eventually([&] { return cluster.leader().has_value(); }));
   gateway::ClientOptions options;
