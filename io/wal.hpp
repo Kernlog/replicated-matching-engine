@@ -71,6 +71,7 @@ class Wal {
   void stage(const RecordHeader& header, std::span<const std::byte> body);
   void flush();
   void roll();
+  log::File& current() noexcept;
 
   std::filesystem::path dir_;
   WalOptions options_;

@@ -194,11 +194,16 @@ void Wal::stage(const RecordHeader& header, std::span<const std::byte> body) {
   staged_bytes_ += record_bytes(body.size());
 }
 
+log::File& Wal::current() noexcept {
+  RME_ASSERT(current_.has_value());
+  return *current_;  // NOLINT(bugprone-unchecked-optional-access)
+}
+
 void Wal::flush() {
   if (staged_bytes_ == 0) {
     return;
   }
-  pwritev_all(current_.value().fd(), iov_, static_cast<off_t>(offset_));
+  pwritev_all(current().fd(), iov_, static_cast<off_t>(offset_));
   offset_ += staged_bytes_;
   ++stats_.writes;
   stats_.bytes += staged_bytes_;
@@ -214,8 +219,8 @@ void Wal::roll() {
   ++sequence_;
   const std::filesystem::path path = segment_path(dir_, sequence_);
   current_.emplace(path, O_RDWR | O_CREAT | O_EXCL);
-  preallocate(current_.value().fd(), options_.segment_bytes);
-  sync_file(current_.value().fd());
+  preallocate(current().fd(), options_.segment_bytes);
+  sync_file(current().fd());
   sync_dir(dir_);
   offset_ = 0;
 }
@@ -226,7 +231,7 @@ void Wal::sync() {
     sync_data(file.fd());
   }
   unsynced_.clear();
-  sync_data(current_.value().fd());
+  sync_data(current().fd());
   ++stats_.syncs;
 }
 
