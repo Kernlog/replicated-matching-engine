@@ -49,6 +49,25 @@ std::optional<Redirect> decode_redirect(std::span<const std::byte> body) {
   return Redirect{.leader = words[0]};
 }
 
+void encode_snapshot(const FeedSnapshot& snapshot, std::vector<std::byte>& out) {
+  std::vector<std::byte> body;
+  append(body, snapshot.applied);
+  append(body, snapshot.next_seq);
+  body.insert(body.end(), snapshot.image.begin(), snapshot.image.end());
+  io::encode_frame(static_cast<std::uint16_t>(FrameType::kSnapshot), body, out);
+}
+
+std::optional<FeedSnapshot> decode_snapshot(std::span<const std::byte> body) {
+  std::array<std::uint64_t, 2> words{};
+  if (body.size() < sizeof words) {
+    return std::nullopt;
+  }
+  std::memcpy(words.data(), body.data(), sizeof words);
+  const std::span<const std::byte> image = body.subspan(sizeof words);
+  return FeedSnapshot{
+      .applied = words[0], .next_seq = words[1], .image = {image.begin(), image.end()}};
+}
+
 void encode_submit(const codec::ClientRecordBytes& record, std::vector<std::byte>& out) {
   io::encode_frame(static_cast<std::uint16_t>(FrameType::kSubmit), record, out);
 }

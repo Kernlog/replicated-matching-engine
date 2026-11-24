@@ -39,8 +39,17 @@ struct Recorded {
 
 class LocalCluster {
  public:
-  explicit LocalCluster(std::uint32_t size, consensus::RaftConfig raft = {})
-      : raft_(std::move(raft)), dirs_(size), outcomes_(size), gateways_(size), nodes_(size) {
+  using Configure = std::function<void(std::uint32_t id, Node&, gateway::Gateway&)>;
+
+  // configure runs for each node before it starts, to attach entry hooks.
+  explicit LocalCluster(std::uint32_t size, Configure configure = {},
+                        consensus::RaftConfig raft = {})
+      : configure_(std::move(configure)),
+        raft_(std::move(raft)),
+        dirs_(size),
+        outcomes_(size),
+        gateways_(size),
+        nodes_(size) {
     for (std::uint32_t id = 1; id <= size; ++id) {
       members_.push_back({consensus::NodeId(id), "127.0.0.1", free_port()});
       client_ports_.push_back(free_port());
@@ -67,6 +76,9 @@ class LocalCluster {
           const std::scoped_lock lock(sink.mutex);
           sink.recorded.push_back({index, outcome});
         });
+    if (configure_) {
+      configure_(id, *nodes_[id - 1], *gateways_[id - 1]);
+    }
     nodes_[id - 1]->start();
     gateways_[id - 1]->start(*nodes_[id - 1]);
   }
@@ -113,6 +125,7 @@ class LocalCluster {
     std::vector<Recorded> recorded;
   };
 
+  Configure configure_;
   consensus::RaftConfig raft_;
   std::vector<io::PeerAddress> members_;
   std::vector<std::uint16_t> client_ports_;

@@ -96,6 +96,10 @@ asio::awaitable<void> Gateway::serve(std::shared_ptr<Connection> connection) {
     }
     decoder.commit(read);
     while (const std::optional<io::Frame> frame = decoder.next()) {
+      if (frame->type == static_cast<std::uint16_t>(FrameType::kSnapshotRequest)) {
+        on_snapshot_request(connection);
+        continue;
+      }
       if (frame->type != static_cast<std::uint16_t>(FrameType::kSubmit)) {
         connection->closed = true;
         break;
@@ -108,6 +112,20 @@ asio::awaitable<void> Gateway::serve(std::shared_ptr<Connection> connection) {
   }
   connection->closed = true;
   connection->wake.cancel();
+}
+
+void Gateway::on_snapshot_request(const std::shared_ptr<Connection>& connection) {
+  node_->request_snapshot([this, weak = std::weak_ptr(connection)](std::uint64_t applied,
+                                                                   std::vector<std::byte> image) {
+    FeedSnapshot snapshot{
+        .applied = applied, .next_seq = next_seq_ ? next_seq_() : 0, .image = std::move(image)};
+    asio::post(io_, [weak, snapshot = std::move(snapshot)] {
+      if (const std::shared_ptr<Connection> alive = weak.lock(); alive && !alive->closed) {
+        encode_snapshot(snapshot, alive->queued);
+        alive->wake.cancel();
+      }
+    });
+  });
 }
 
 void Gateway::on_submit(const std::shared_ptr<Connection>& connection,

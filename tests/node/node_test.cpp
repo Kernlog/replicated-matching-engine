@@ -100,7 +100,7 @@ TEST(Node, LeaderAtItsUncommittedLimitHoldsCommandsInsteadOfDroppingThem) {
   raft.max_uncommitted_entries = 2;
   // Slow disks must not trigger an election mid-test: a follower drops what it is sent.
   raft.election_ticks = 200;
-  LocalCluster cluster(3, raft);
+  LocalCluster cluster(3, {}, raft);
   ASSERT_TRUE(LocalCluster::eventually([&] { return cluster.leader().has_value(); }));
   const std::uint32_t leader = cluster.leader().value_or(1);
   const std::uint64_t session = register_client(cluster, leader, 3);

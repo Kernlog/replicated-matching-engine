@@ -13,7 +13,13 @@
 namespace rme::gateway {
 
 // Client frames share the peer frame header; the type field tells them apart.
-enum class FrameType : std::uint8_t { kSubmit = 16, kAck = 17, kRedirect = 18 };
+enum class FrameType : std::uint8_t {
+  kSubmit = 16,
+  kAck = 17,
+  kRedirect = 18,
+  kSnapshotRequest = 19,
+  kSnapshot = 20
+};
 
 // Sent once the command's entry is committed and applied on the leader, with its events.
 struct Ack {
@@ -35,6 +41,16 @@ struct Redirect {
 
 void encode_redirect(const Redirect& redirect, std::vector<std::byte>& out);
 [[nodiscard]] std::optional<Redirect> decode_redirect(std::span<const std::byte> body);
+
+// The replica image after entry applied; next_seq is the first feed message after it.
+struct FeedSnapshot {
+  std::uint64_t applied = 0;
+  std::uint64_t next_seq = 0;
+  std::vector<std::byte> image;
+};
+
+void encode_snapshot(const FeedSnapshot& snapshot, std::vector<std::byte>& out);
+[[nodiscard]] std::optional<FeedSnapshot> decode_snapshot(std::span<const std::byte> body);
 
 void encode_submit(const codec::ClientRecordBytes& record, std::vector<std::byte>& out);
 void encode_ack(const Ack& ack, std::vector<std::byte>& out);
