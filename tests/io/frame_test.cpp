@@ -36,15 +36,14 @@ TEST(Frame, PadsBodiesToEightBytes) {
 TEST(Frame, DecodesManyFramesFromOneRead) {
   std::vector<std::byte> stream;
   for (std::uint8_t i = 0; i < 10; ++i) {
-    encode_frame(i, bytes(i * 7U, i), stream);
+    encode_frame(i, bytes(std::size_t{i} * 7, i), stream);
   }
   FrameDecoder decoder(64);
   feed(decoder, stream);
   for (std::uint8_t i = 0; i < 10; ++i) {
-    const std::optional<Frame> frame = decoder.next();
-    ASSERT_TRUE(frame.has_value());
-    EXPECT_EQ(frame->type, i);
-    EXPECT_TRUE(std::ranges::equal(frame->body, bytes(i * 7U, i)));
+    const Frame frame = decoder.next().value_or(Frame{.type = 0xFFFF, .body = {}});
+    ASSERT_EQ(frame.type, i);
+    EXPECT_TRUE(std::ranges::equal(frame.body, bytes(std::size_t{i} * 7, i)));
   }
   EXPECT_FALSE(decoder.next().has_value());
   EXPECT_EQ(decoder.buffered(), 0U);
@@ -121,9 +120,9 @@ TEST(Frame, GrowsForAFrameLargerThanTheBuffer) {
     feed(decoder, std::span(stream).subspan(at, chunk));
     at += chunk;
   }
-  const std::optional<Frame> frame = decoder.next();
-  ASSERT_TRUE(frame.has_value());
-  EXPECT_EQ(frame->body.size(), 10'000U);
+  const Frame frame = decoder.next().value_or(Frame{.type = 0xFFFF, .body = {}});
+  ASSERT_EQ(frame.type, 5);
+  EXPECT_EQ(frame.body.size(), 10'000U);
 }
 
 }  // namespace
