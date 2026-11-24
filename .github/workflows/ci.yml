@@ -123,6 +123,7 @@ jobs:
       - run: cmake --preset fuzz
       - run: cmake --build --preset fuzz
       - run: build/fuzz/fuzz/decode_fuzz -max_total_time=30 -print_final_stats=1
+      - run: build/fuzz/fuzz/frame_fuzz -max_total_time=30 -print_final_stats=1
 
   tidy:
     runs-on: ubuntu-24.04
