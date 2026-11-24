@@ -182,31 +182,26 @@ TEST(Node, FeedSeqsSurviveSnapshotsAndRestarts) {
   testing::CommandStream stream(8);
   submit_commands(cluster, leader, session, 1, 200, stream);
   ASSERT_TRUE(LocalCluster::eventually([&] { return converged(cluster, 3); }));
-  std::size_t before_stop = 0;
-  {
-    const std::scoped_lock lock(mutex);
-    before_stop = seqs.at(follower - 1).size();
-  }
   cluster.stop(follower);
   submit_commands(cluster, leader, session, 201, 400, stream);
   ASSERT_TRUE(
       LocalCluster::eventually([&] { return applied_commands(cluster, leader, session) == 600; }));
   cluster.start(follower);
   ASSERT_TRUE(LocalCluster::eventually([&] { return converged(cluster, 3); }));
+  // The follower is now past the leader's snapshot, so what it applies next is numbered from the
+  // replica state that snapshot carried.
+  const std::uint64_t rejoined_at = cluster.node(follower).status().applied;
+  submit_commands(cluster, leader, session, 601, 100, stream);
+  ASSERT_TRUE(LocalCluster::eventually([&] { return converged(cluster, 3); }));
   const std::scoped_lock lock(mutex);
-  std::size_t shared = 0;
+  std::size_t after_rejoin = 0;
   for (const auto& [index, first_seq] : seqs.at(follower - 1)) {
-    if (const auto found = seqs.at(leader - 1).find(index); found != seqs.at(leader - 1).end()) {
-      EXPECT_EQ(first_seq, found->second) << "index " << index;
-      ++shared;
-    }
+    const auto found = seqs.at(leader - 1).find(index);
+    ASSERT_NE(found, seqs.at(leader - 1).end()) << "index " << index;
+    EXPECT_EQ(first_seq, found->second) << "index " << index;
+    after_rejoin += index > rejoined_at ? 1U : 0U;
   }
-  EXPECT_GT(shared, 20U) << "follower " << follower << " saw " << seqs.at(follower - 1).size()
-                         << " (" << before_stop << " before stopping, keys "
-                         << seqs.at(follower - 1).begin()->first << ".."
-                         << seqs.at(follower - 1).rbegin()->first << "), leader " << leader
-                         << " saw " << seqs.at(leader - 1).size() << " applied "
-                         << cluster.node(leader).status().applied;
+  EXPECT_GE(after_rejoin, 20U);
 }
 
 }  // namespace
