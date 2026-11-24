@@ -198,7 +198,7 @@ void Wal::flush() {
   if (staged_bytes_ == 0) {
     return;
   }
-  pwritev_all(current_->fd(), iov_, static_cast<off_t>(offset_));
+  pwritev_all(current_.value().fd(), iov_, static_cast<off_t>(offset_));
   offset_ += staged_bytes_;
   ++stats_.writes;
   stats_.bytes += staged_bytes_;
@@ -214,8 +214,8 @@ void Wal::roll() {
   ++sequence_;
   const std::filesystem::path path = segment_path(dir_, sequence_);
   current_.emplace(path, O_RDWR | O_CREAT | O_EXCL);
-  preallocate(current_->fd(), options_.segment_bytes);
-  sync_file(current_->fd());
+  preallocate(current_.value().fd(), options_.segment_bytes);
+  sync_file(current_.value().fd());
   sync_dir(dir_);
   offset_ = 0;
 }
@@ -226,7 +226,7 @@ void Wal::sync() {
     sync_data(file.fd());
   }
   unsynced_.clear();
-  sync_data(current_->fd());
+  sync_data(current_.value().fd());
   ++stats_.syncs;
 }
 

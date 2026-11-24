@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <climits>
+#include <span>
 #include <system_error>
 
 #include "log/command_log.hpp"
@@ -77,7 +78,10 @@ void pwritev_all(int fd, std::span<iovec> iov, off_t offset) {
       iov = iov.subspan(1);
     }
     if (left != 0) {
-      iov.front().iov_base = static_cast<std::byte*>(iov.front().iov_base) + left;
+      iov.front().iov_base =
+          std::span(static_cast<std::byte*>(iov.front().iov_base), iov.front().iov_len)
+              .subspan(left)
+              .data();
       iov.front().iov_len -= left;
     }
   }
