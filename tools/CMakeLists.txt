@@ -14,6 +14,11 @@ if(TARGET rme_testing)
   add_executable(chaos_client chaos_client.cpp)
   target_link_libraries(chaos_client PRIVATE rme_gateway rme_testing CLI11::CLI11)
 
+  find_package(hdr_histogram CONFIG REQUIRED)
+  add_executable(loadgen loadgen.cpp)
+  target_link_libraries(loadgen PRIVATE rme_gateway rme_testing CLI11::CLI11
+                        $<IF:$<TARGET_EXISTS:hdr_histogram::hdr_histogram>,hdr_histogram::hdr_histogram,hdr_histogram::hdr_histogram_static>)
+
   add_executable(audit audit.cpp)
   target_link_libraries(audit PRIVATE rme_io rme_replica CLI11::CLI11)
 endif()
