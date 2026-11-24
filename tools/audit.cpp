@@ -1,5 +1,5 @@
 #include <CLI/CLI.hpp>
-
+#include <algorithm>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
@@ -63,6 +63,98 @@ Replayed replay(const std::string& dir) {
   return out;
 }
 
+class Violations {
+ public:
+  void add(const std::string& what) {
+    if (++count_ <= 20) {
+      std::cout << "VIOLATION " << what << '\n';
+    }
+  }
+  [[nodiscard]] std::uint64_t count() const noexcept { return count_; }
+
+ private:
+  std::uint64_t count_ = 0;
+};
+
+void check_duplicates(const std::vector<Replayed>& nodes, Violations& violations) {
+  for (std::size_t n = 0; n < nodes.size(); ++n) {
+    for (const auto& [key, runs] : nodes[n].applied) {
+      if (runs.size() > 1) {
+        violations.add("node " + std::to_string(n + 1) + " executed session " +
+                       std::to_string(key.first) + " seq " + std::to_string(key.second) + " " +
+                       std::to_string(runs.size()) + " times");
+      }
+    }
+  }
+}
+
+struct Counts {
+  std::uint64_t acked = 0;
+  std::uint64_t indeterminate = 0;
+};
+
+std::size_t holders(const std::vector<Replayed>& nodes, std::uint64_t session, std::uint64_t seq,
+                    std::uint64_t index, std::uint64_t digest) {
+  std::size_t count = 0;
+  for (const Replayed& node : nodes) {
+    const auto found = node.applied.find({session, seq});
+    count += found != node.applied.end() && found->second.front().index == index &&
+                     found->second.front().digest == digest
+                 ? 1
+                 : 0;
+  }
+  return count;
+}
+
+Counts check_acks(const std::string& path, const std::vector<Replayed>& nodes,
+                  Violations& violations) {
+  Counts counts;
+  std::ifstream history(path);
+  std::string line;
+  while (std::getline(history, line)) {
+    std::istringstream fields(line);
+    std::uint64_t worker = 0;
+    std::uint64_t session = 0;
+    std::uint64_t seq = 0;
+    std::int64_t start = 0;
+    std::int64_t end = 0;
+    std::string outcome;
+    std::uint64_t index = 0;
+    std::uint64_t digest = 0;
+    fields >> worker >> session >> seq >> start >> end >> outcome >> index >> digest;
+    if (outcome != "ok") {
+      ++counts.indeterminate;
+      continue;
+    }
+    ++counts.acked;
+    if (const std::size_t held = holders(nodes, session, seq, index, digest);
+        held * 2 <= nodes.size()) {
+      violations.add("acked session " + std::to_string(session) + " seq " + std::to_string(seq) +
+                     " at index " + std::to_string(index) + " is in " + std::to_string(held) +
+                     " logs");
+    }
+  }
+  return counts;
+}
+
+std::uint64_t check_hashes(const std::vector<Replayed>& nodes, Violations& violations) {
+  std::uint64_t compared = 0;
+  for (std::size_t a = 0; a < nodes.size(); ++a) {
+    for (std::size_t b = a + 1; b < nodes.size(); ++b) {
+      const std::size_t common = std::min(nodes[a].log.size(), nodes[b].log.size());
+      for (std::size_t i = 0; i < common && nodes[a].log[i] == nodes[b].log[i]; ++i) {
+        ++compared;
+        if (nodes[a].hash_at[i] != nodes[b].hash_at[i]) {
+          violations.add("nodes " + std::to_string(a + 1) + " and " + std::to_string(b + 1) +
+                         " disagree on the book at index " + std::to_string(i + 1));
+          break;
+        }
+      }
+    }
+  }
+  return compared;
+}
+
 }  // namespace
 
 // Checks the WALs a chaos run left against its client history: every acked command is in a
@@ -77,78 +169,18 @@ int main(int argc, char** argv) {
   CLI11_PARSE(app, argc, argv);
 
   std::vector<Replayed> nodes;
+  nodes.reserve(dirs.size());
   for (const std::string& dir : dirs) {
     nodes.push_back(replay(dir));
   }
-  std::uint64_t violations = 0;
-  const auto fail = [&](const std::string& what) {
-    if (++violations <= 20) {
-      std::cout << "VIOLATION " << what << '\n';
-    }
-  };
-
-  for (std::size_t n = 0; n < nodes.size(); ++n) {
-    for (const auto& [key, runs] : nodes[n].applied) {
-      if (runs.size() > 1) {
-        fail("node " + std::to_string(n + 1) + " executed session " + std::to_string(key.first) +
-             " seq " + std::to_string(key.second) + " " + std::to_string(runs.size()) + " times");
-      }
-    }
-  }
-
-  std::ifstream history(history_path);
-  std::string line;
-  std::uint64_t acked = 0;
-  std::uint64_t indeterminate = 0;
-  while (std::getline(history, line)) {
-    std::istringstream fields(line);
-    std::uint64_t worker = 0;
-    std::uint64_t session = 0;
-    std::uint64_t seq = 0;
-    std::int64_t start = 0;
-    std::int64_t end = 0;
-    std::string outcome;
-    std::uint64_t index = 0;
-    std::uint64_t digest = 0;
-    fields >> worker >> session >> seq >> start >> end >> outcome >> index >> digest;
-    if (outcome != "ok") {
-      ++indeterminate;
-      continue;
-    }
-    ++acked;
-    std::size_t holders = 0;
-    for (const Replayed& node : nodes) {
-      const auto found = node.applied.find({session, seq});
-      holders += found != node.applied.end() && found->second.front().index == index &&
-                         found->second.front().digest == digest
-                     ? 1
-                     : 0;
-    }
-    if (holders * 2 <= nodes.size()) {
-      fail("acked session " + std::to_string(session) + " seq " + std::to_string(seq) +
-           " at index " + std::to_string(index) + " is in " + std::to_string(holders) + " logs");
-    }
-  }
-
-  std::uint64_t compared = 0;
-  for (std::size_t a = 0; a < nodes.size(); ++a) {
-    for (std::size_t b = a + 1; b < nodes.size(); ++b) {
-      const std::size_t common = std::min(nodes[a].log.size(), nodes[b].log.size());
-      for (std::size_t i = 0; i < common && nodes[a].log[i] == nodes[b].log[i]; ++i) {
-        ++compared;
-        if (nodes[a].hash_at[i] != nodes[b].hash_at[i]) {
-          fail("nodes " + std::to_string(a + 1) + " and " + std::to_string(b + 1) +
-               " disagree on the book at index " + std::to_string(i + 1));
-          break;
-        }
-      }
-    }
-  }
-
-  std::cout << "acked=" << acked << " indeterminate=" << indeterminate;
+  Violations violations;
+  check_duplicates(nodes, violations);
+  const Counts counts = check_acks(history_path, nodes, violations);
+  const std::uint64_t compared = check_hashes(nodes, violations);
+  std::cout << "acked=" << counts.acked << " indeterminate=" << counts.indeterminate;
   for (std::size_t n = 0; n < nodes.size(); ++n) {
     std::cout << " log" << n + 1 << '=' << nodes[n].log.size();
   }
-  std::cout << " hash_checks=" << compared << " violations=" << violations << '\n';
-  return violations == 0 ? 0 : 1;
+  std::cout << " hash_checks=" << compared << " violations=" << violations.count() << '\n';
+  return violations.count() == 0 ? 0 : 1;
 }
