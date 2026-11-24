@@ -6,4 +6,4 @@ target_link_libraries(rme_node PUBLIC rme_io rme_replica rme_consensus spdlog::s
 
 add_executable(rme_node_bin main.cpp)
 set_target_properties(rme_node_bin PROPERTIES OUTPUT_NAME rme_node)
-target_link_libraries(rme_node_bin PRIVATE rme_node rme_gateway CLI11::CLI11)
+target_link_libraries(rme_node_bin PRIVATE rme_node rme_gateway rme_md CLI11::CLI11)

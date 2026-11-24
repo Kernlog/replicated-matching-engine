@@ -50,6 +50,7 @@ struct NodeStatus {
 class Node {
  public:
   using OutcomeHandler = std::function<void(std::uint64_t index, const engine::Outcome&)>;
+  using EntryHandler = std::function<void(const consensus::Entry&)>;
 
   Node(NodeConfig config, OutcomeHandler on_outcome = {});
   Node(const Node&) = delete;
@@ -57,6 +58,9 @@ class Node {
   Node(Node&&) = delete;
   Node& operator=(Node&&) = delete;
   ~Node();
+
+  // Runs on the core thread after each entry is applied; set before start.
+  void on_entry(EntryHandler handler) { on_entry_ = std::move(handler); }
 
   void start();
   // Stops the core first, then the network, then drains the storage thread.
@@ -87,6 +91,7 @@ class Node {
 
   NodeConfig config_;
   OutcomeHandler on_outcome_;
+  EntryHandler on_entry_;
   io::DiskStorage storage_;
   io::Durable recovered_;
   engine::Replica replica_;

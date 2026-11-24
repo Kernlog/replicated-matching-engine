@@ -225,6 +225,9 @@ void Node::apply(const consensus::Entry& entry) {
       on_outcome_(entry.index.value(), outcome);
     }
   }
+  if (on_entry_) {
+    on_entry_(entry);
+  }
 }
 
 void Node::publish() {
