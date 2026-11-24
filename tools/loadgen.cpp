@@ -81,7 +81,7 @@ class Stream {
         return;
       }
       ++acked_;
-      applied_ += ack->result == rme::engine::SessionResult::kApplied ? 1 : 0;
+      applied_ += ack->result == rme::engine::SessionResult::kApplied ? 1U : 0U;
       const std::int64_t intended = intended_[ack->seq].load(std::memory_order_acquire);
       if (intended >= 0) {
         hdr_record_value(histogram_.get(), ns(Clock::now()) - intended);
