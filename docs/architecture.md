@@ -57,17 +57,33 @@ on separate 128-byte lines, acquire/release only, batch push and pop.
 - On open, a record with an all-zero sector is a torn write: the log ends there and the tail is
   zeroed. Any other CRC failure is corruption and fails stop.
 - Hard state and snapshot files are replaced with write, fsync, rename, fsync directory.
+- Every `--snapshot-every` applied entries (default 100,000) the core snapshots the replica and
+  compacts the log behind it. Closed WAL segments whose entries all sit below the latest snapshot
+  mark are deleted after the next sync, and synced segments are dropped from the page cache.
+- The replica counts sequenced records and its snapshot carries the count, so market data seqs
+  continue across restarts and installed snapshots.
+
+## Losing a disk
+
+A node that restarts with an empty data directory would otherwise act as a new member and could
+vote again in a term it already voted in. After replacing a node's disk, start it with
+`--lost-state`, or create an empty `LOST_STATE` file in its data directory before it starts. The
+node then rejoins without voting and without counting toward any commit quorum until it has
+learned every peer's term and caught up to a leader of the current term; it removes the marker
+itself once recovered, so a crash during recovery keeps the protection. Recover one node at a
+time: two lost nodes out of three cannot elect a leader until one of them is restored from a
+peer.
 
 ## Verification
 
 | Layer | Tool | Where |
 |---|---|---|
 | protocol | TLA+ model of elections and AppendEntries, checked by TLC | `spec/`, `tlc.yml` |
-| consensus | deterministic simulator: fake clock, network, disk; swarm fault schedules; invariant checker | `sim/`, 500 seeds per PR, 100,000 nightly |
+| consensus | deterministic simulator: fake clock, network, disk; swarm fault schedules; invariant checker | `sim/`, 500 seeds plus every bug-log seed per PR, a new block of 100,000 nightly |
 | engine | replay of 10M commands built with clang and gcc must produce the same book hash | `replay-gate` |
 | wire | libFuzzer over record, frame and Raft message decoders | `fuzz/` |
 | threads | TSan over the whole suite | `tsan` |
-| real IO | Docker chaos: kill, partition, latency, pause; WAL audit and Porcupine | `chaos/`, nightly |
+| real IO | Docker chaos: kill, partition, latency, pause, disk wipe; WAL audit and Porcupine | `chaos/`, nightly |
 
 ## Replaying a failing seed
 
