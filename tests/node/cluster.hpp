@@ -1,0 +1,109 @@
+#pragma once
+
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <chrono>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <thread>
+#include <vector>
+
+#include "node/node.hpp"
+#include "tests/io/temp_dir.hpp"
+
+namespace rme::node {
+
+// A port the kernel just handed out and released, so a node can bind it right after.
+inline std::uint16_t free_port() {
+  const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+  sockaddr_in address{};
+  address.sin_family = AF_INET;
+  address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  ::bind(fd, reinterpret_cast<sockaddr*>(&address), sizeof address);  // NOLINT(*-reinterpret-cast)
+  socklen_t size = sizeof address;
+  ::getsockname(fd, reinterpret_cast<sockaddr*>(&address), &size);  // NOLINT(*-reinterpret-cast)
+  ::close(fd);
+  return ntohs(address.sin_port);
+}
+
+struct Recorded {
+  std::uint64_t index = 0;
+  engine::Outcome outcome;
+};
+
+class LocalCluster {
+ public:
+  explicit LocalCluster(std::uint32_t size) : dirs_(size), outcomes_(size), nodes_(size) {
+    for (std::uint32_t id = 1; id <= size; ++id) {
+      members_.push_back({consensus::NodeId(id), "127.0.0.1", free_port()});
+    }
+    for (std::uint32_t id = 1; id <= size; ++id) {
+      start(id);
+    }
+  }
+
+  void start(std::uint32_t id) {
+    NodeConfig config;
+    config.id = consensus::NodeId(id);
+    config.members = members_;
+    config.data_dir = dirs_[id - 1].path();
+    config.listen_host = "127.0.0.1";
+    config.tick = std::chrono::milliseconds(5);
+    auto& sink = outcomes_[id - 1];
+    nodes_[id - 1] = std::make_unique<Node>(
+        config, [&sink](std::uint64_t index, const engine::Outcome& outcome) {
+          const std::scoped_lock lock(sink.mutex);
+          sink.recorded.push_back({index, outcome});
+        });
+    nodes_[id - 1]->start();
+  }
+
+  void stop(std::uint32_t id) { nodes_[id - 1].reset(); }
+
+  Node& node(std::uint32_t id) { return *nodes_[id - 1]; }
+  [[nodiscard]] bool running(std::uint32_t id) const { return nodes_[id - 1] != nullptr; }
+
+  std::vector<Recorded> outcomes(std::uint32_t id) {
+    const std::scoped_lock lock(outcomes_[id - 1].mutex);
+    return outcomes_[id - 1].recorded;
+  }
+
+  std::optional<std::uint32_t> leader() {
+    for (std::uint32_t id = 1; id <= nodes_.size(); ++id) {
+      if (running(id) && node(id).status().role == consensus::Role::kLeader) {
+        return id;
+      }
+    }
+    return std::nullopt;
+  }
+
+  template <typename Predicate>
+  static bool eventually(Predicate done, std::chrono::seconds timeout = std::chrono::seconds(20)) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+      if (done()) {
+        return true;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return done();
+  }
+
+ private:
+  struct Sink {
+    std::mutex mutex;
+    std::vector<Recorded> recorded;
+  };
+
+  std::vector<io::PeerAddress> members_;
+  std::vector<io::TempDir> dirs_;
+  std::vector<Sink> outcomes_;
+  std::vector<std::unique_ptr<Node>> nodes_;
+};
+
+}  // namespace rme::node
