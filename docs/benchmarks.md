@@ -76,8 +76,7 @@ into one log entry (`--max-entry-bytes`), WALs in memory, rates tried 25k to 300
 | 512 | 150k/s | 306 us | 4.4 ms | 21.2 ms |
 | 1365 (64 KiB) | 150k/s | 320 us | 4.6 ms | 21.7 ms |
 
-Packing commands triples the sustainable rate; past 8 per entry the per-entry costs are amortized
-and the limit is the single load-generator thread and the core threads sharing a VM.
+Packing commands triples the sustainable rate; beyond 8 per entry it no longer moves.
 
 ## Failover
 
@@ -89,7 +88,7 @@ the longest gap between consecutive acks is the client-visible unavailability. E
 |---|---|---|---|---|
 | 142 ms | 183 ms | 682 ms | 682 ms | 151 ms |
 
-The tail is a split vote that needed a second election.
+99 of 100 runs recovered within 200 ms; one took 682 ms.
 
 ## Thread pinning
 
