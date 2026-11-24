@@ -39,8 +39,8 @@ struct Recorded {
 
 class LocalCluster {
  public:
-  explicit LocalCluster(std::uint32_t size)
-      : dirs_(size), outcomes_(size), gateways_(size), nodes_(size) {
+  explicit LocalCluster(std::uint32_t size, consensus::RaftConfig raft = {})
+      : raft_(std::move(raft)), dirs_(size), outcomes_(size), gateways_(size), nodes_(size) {
     for (std::uint32_t id = 1; id <= size; ++id) {
       members_.push_back({consensus::NodeId(id), "127.0.0.1", free_port()});
       client_ports_.push_back(free_port());
@@ -113,6 +113,7 @@ class LocalCluster {
     std::vector<Recorded> recorded;
   };
 
+  consensus::RaftConfig raft_;
   std::vector<io::PeerAddress> members_;
   std::vector<std::uint16_t> client_ports_;
   std::vector<io::TempDir> dirs_;

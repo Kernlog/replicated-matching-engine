@@ -98,7 +98,7 @@ TEST(Node, LeaderAtItsUncommittedLimitHoldsCommandsInsteadOfDroppingThem) {
   consensus::RaftConfig raft;
   raft.max_entry_bytes = codec::kClientRecordSize;
   raft.max_uncommitted_entries = 2;
-  LocalCluster cluster(3, {}, raft);
+  LocalCluster cluster(3, raft);
   ASSERT_TRUE(LocalCluster::eventually([&] { return cluster.leader().has_value(); }));
   const std::uint32_t leader = cluster.leader().value_or(1);
   const std::uint64_t session = register_client(cluster, leader, 3);
