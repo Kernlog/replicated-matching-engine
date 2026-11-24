@@ -57,6 +57,8 @@ int main(int argc, char** argv) {
   app.add_option("--listen", config.listen_host, "Address to accept peers on");
   app.add_option("--client-port", client_port, "Port the client gateway listens on");
   app.add_option("--tick-ms", tick_ms, "Raft tick interval")->check(CLI::Range(1U, 1000U));
+  app.add_option("--max-entry-bytes", config.raft.max_entry_bytes,
+                 "Command bytes packed into one log entry");
   app.add_option("--election-ticks", config.raft.election_ticks, "Ticks before an election")
       ->check(CLI::Range(2U, 1000U));
   app.add_option("--md-target", md_target, "ip:port to publish the sequenced market data feed to");
