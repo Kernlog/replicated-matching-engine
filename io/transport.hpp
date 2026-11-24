@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -49,7 +50,7 @@ class Transport {
   [[nodiscard]] std::uint16_t port() const;
 
   void add_peer(PeerAddress address);
-  void start();
+  void start(std::optional<int> cpu = std::nullopt);
   // Stops the network thread; nothing is delivered or sent after it returns.
   void stop();
 

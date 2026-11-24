@@ -32,6 +32,11 @@ struct NodeConfig {
   std::chrono::milliseconds tick{10};
   consensus::RaftConfig raft;
   engine::ReplicaConfig replica;
+  std::optional<int> core_cpu;
+  std::optional<int> network_cpu;
+  std::optional<int> storage_cpu;
+  // Spin instead of sleeping when idle: lowest latency, one core always busy.
+  bool busy_poll = false;
 };
 
 // What the core thread last published, for health checks and tests.

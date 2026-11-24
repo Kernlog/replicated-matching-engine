@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "gateway/gateway.hpp"
+#include "io/affinity.hpp"
 #include "md/publisher.hpp"
 #include "node/node.hpp"
 
@@ -59,6 +60,11 @@ int main(int argc, char** argv) {
   app.add_option("--election-ticks", config.raft.election_ticks, "Ticks before an election")
       ->check(CLI::Range(2U, 1000U));
   app.add_option("--md-target", md_target, "ip:port to publish the sequenced market data feed to");
+  std::vector<int> cpus;
+  bool lock_memory = false;
+  app.add_option("--cpus", cpus, "CPUs for the core, network and storage threads")->expected(3);
+  app.add_flag("--busy-poll", config.busy_poll, "Spin the core thread instead of sleeping");
+  app.add_flag("--mlock", lock_memory, "Lock all memory after startup (needs IPC_LOCK)");
   app.add_option("--log-level", level, "trace, debug, info, warn or error");
   CLI11_PARSE(app, argc, argv);
 
@@ -78,6 +84,11 @@ int main(int argc, char** argv) {
     for (std::size_t i = 0; i < members.size(); ++i) {
       config.members.push_back(parse_member(static_cast<std::uint32_t>(i + 1), members[i]));
     }
+    if (cpus.size() == 3) {
+      config.core_cpu = cpus[0];
+      config.network_cpu = cpus[1];
+      config.storage_cpu = cpus[2];
+    }
     rme::gateway::Gateway gateway(config.listen_host, client_port);
     rme::node::Node node(config, gateway.outcome_handler());
     std::optional<rme::md::Publisher> publisher;
@@ -88,6 +99,9 @@ int main(int argc, char** argv) {
         publisher->publish(entry.index.value(),
                            entry.data);  // NOLINT(bugprone-unchecked-optional-access)
       });
+    }
+    if (lock_memory) {
+      rme::io::lock_all_memory();
     }
     node.start();
     gateway.start(node);

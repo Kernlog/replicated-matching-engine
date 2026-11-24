@@ -33,7 +33,7 @@ struct GroupCommitStats {
 class StorageThread {
  public:
   StorageThread(DiskStorage& storage, std::function<void()> on_synced = {},
-                std::size_t capacity = 1024);
+                std::size_t capacity = 1024, std::optional<int> cpu = std::nullopt);
   StorageThread(const StorageThread&) = delete;
   StorageThread& operator=(const StorageThread&) = delete;
   StorageThread(StorageThread&&) = delete;
