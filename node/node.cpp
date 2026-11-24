@@ -101,7 +101,8 @@ NodeStatus Node::status() const noexcept {
                     .leader = published_.leader.load(std::memory_order_relaxed),
                     .commit = published_.commit.load(std::memory_order_relaxed),
                     .applied = published_.applied.load(std::memory_order_relaxed),
-                    .replica_hash = published_.replica_hash.load(std::memory_order_relaxed)};
+                    .replica_hash = published_.replica_hash.load(std::memory_order_relaxed),
+                    .snapshot_index = published_.snapshot_index.load(std::memory_order_relaxed)};
 }
 
 void Node::run(const std::stop_token& stop) {
@@ -129,6 +130,7 @@ void Node::run(const std::stop_token& stop) {
       busy = true;
     }
     busy = release() || busy;
+    maybe_compact();
     if (sent_) {
       transport_.flush();
       sent_ = false;
@@ -203,6 +205,21 @@ io::StorageThread& Node::storage_thread() noexcept {
   return *storage_thread_;  // NOLINT(bugprone-unchecked-optional-access)
 }
 
+// The image must be taken at the index Raft reports as applied, so compaction waits until every
+// handed-out entry has been applied. The snapshot goes through the storage thread like any other
+// write; until it is durable a restart replays the log the snapshot replaces.
+void Node::maybe_compact() {
+  if (config_.snapshot_every == 0 || !held_.empty() ||
+      (raft_.applied() - raft_.log().snapshot_index()).value() < config_.snapshot_every) {
+    return;
+  }
+  RME_ASSERT(replica_.applied_index() == raft_.applied().value());
+  io::StorageWork work;
+  work.seq = ++seq_;
+  work.snapshot = raft_.compact(replica_.snapshot());
+  storage_thread().submit(std::move(work));
+}
+
 bool Node::release() {
   const std::uint64_t synced = storage_thread().synced();
   bool released = false;
@@ -256,6 +273,7 @@ void Node::publish() {
   published_.term.store(raft_.term().value(), std::memory_order_relaxed);
   published_.commit.store(raft_.commit().value(), std::memory_order_relaxed);
   published_.applied.store(replica_.applied_index(), std::memory_order_relaxed);
+  published_.snapshot_index.store(raft_.log().snapshot_index().value(), std::memory_order_relaxed);
 }
 
 }  // namespace rme::node

@@ -43,10 +43,9 @@ class LocalCluster {
   using Configure = std::function<void(std::uint32_t id, Node&, gateway::Gateway&)>;
 
   // configure runs for each node before it starts, to attach entry hooks.
-  explicit LocalCluster(std::uint32_t size, Configure configure = {},
-                        consensus::RaftConfig raft = {})
+  explicit LocalCluster(std::uint32_t size, Configure configure = {}, NodeConfig base = {})
       : configure_(std::move(configure)),
-        raft_(std::move(raft)),
+        base_(std::move(base)),
         dirs_(size),
         outcomes_(size),
         gateways_(size),
@@ -77,13 +76,12 @@ class LocalCluster {
   }
 
   void start(std::uint32_t id) {
-    NodeConfig config;
+    NodeConfig config = base_;
     config.id = consensus::NodeId(id);
     config.members = members_;
     config.data_dir = dirs_[id - 1].path();
     config.listen_host = "127.0.0.1";
     config.tick = std::chrono::milliseconds(5);
-    config.raft = raft_;
     auto& sink = outcomes_[id - 1];
     gateways_[id - 1] = std::make_unique<gateway::Gateway>("127.0.0.1", client_ports_[id - 1]);
     nodes_[id - 1] =
@@ -143,7 +141,7 @@ class LocalCluster {
   };
 
   Configure configure_;
-  consensus::RaftConfig raft_;
+  NodeConfig base_;
   std::vector<io::PeerAddress> members_;
   std::vector<std::uint16_t> client_ports_;
   std::vector<io::TempDir> dirs_;
