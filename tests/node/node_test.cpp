@@ -95,12 +95,12 @@ TEST(Node, RestartedFollowerRecoversFromDiskAndCatchesUp) {
 // A leader at its uncommitted limit must hold commands back, not drop them: a dropped seq would
 // make every later command of the session out of order.
 TEST(Node, LeaderAtItsUncommittedLimitHoldsCommandsInsteadOfDroppingThem) {
-  consensus::RaftConfig raft;
-  raft.max_entry_bytes = codec::kClientRecordSize;
-  raft.max_uncommitted_entries = 2;
+  NodeConfig base;
+  base.raft.max_entry_bytes = codec::kClientRecordSize;
+  base.raft.max_uncommitted_entries = 2;
   // Slow disks must not trigger an election mid-test: a follower drops what it is sent.
-  raft.election_ticks = 200;
-  LocalCluster cluster(3, {}, raft);
+  base.raft.election_ticks = 200;
+  LocalCluster cluster(3, {}, base);
   ASSERT_TRUE(LocalCluster::eventually([&] { return cluster.leader().has_value(); }));
   const std::uint32_t leader = cluster.leader().value_or(1);
   const std::uint64_t session = register_client(cluster, leader, 3);
@@ -115,6 +115,47 @@ TEST(Node, LeaderAtItsUncommittedLimitHoldsCommandsInsteadOfDroppingThem) {
                                            engine::SessionResult::kOutOfOrder;
                                   }),
             0);
+}
+
+NodeConfig compacting() {
+  NodeConfig base;
+  base.snapshot_every = 64;
+  base.raft.max_entry_bytes = 4 * codec::kClientRecordSize;
+  return base;
+}
+
+TEST(Node, CompactsTheLogAndKeepsAgreeing) {
+  LocalCluster cluster(3, {}, compacting());
+  ASSERT_TRUE(LocalCluster::eventually([&] { return cluster.leader().has_value(); }));
+  const std::uint32_t leader = cluster.leader().value_or(1);
+  const std::uint64_t session = register_client(cluster, leader, 21);
+  testing::CommandStream stream(4);
+  submit_commands(cluster, leader, session, 1, 600, stream);
+  ASSERT_TRUE(LocalCluster::eventually(
+      [&] { return applied_commands(cluster, leader, session) == 600 && converged(cluster, 3); }));
+  for (std::uint32_t id = 1; id <= 3; ++id) {
+    EXPECT_GE(cluster.node(id).status().snapshot_index, 64U) << id;
+  }
+}
+
+// A follower that misses more than a snapshot interval restarts from its own snapshot and WAL,
+// then takes the leader's snapshot for the entries the leader no longer holds.
+TEST(Node, FollowerBehindTheLeadersSnapshotCatchesUp) {
+  LocalCluster cluster(3, {}, compacting());
+  ASSERT_TRUE(LocalCluster::eventually([&] { return cluster.leader().has_value(); }));
+  const std::uint32_t leader = cluster.leader().value_or(1);
+  const std::uint32_t follower = leader % 3 + 1;
+  const std::uint64_t session = register_client(cluster, leader, 22);
+  testing::CommandStream stream(6);
+  submit_commands(cluster, leader, session, 1, 300, stream);
+  ASSERT_TRUE(LocalCluster::eventually([&] { return converged(cluster, 3); }));
+  const std::uint64_t stopped_at = cluster.node(follower).status().applied;
+  cluster.stop(follower);
+  submit_commands(cluster, leader, session, 301, 600, stream);
+  ASSERT_TRUE(LocalCluster::eventually(
+      [&] { return cluster.node(leader).status().snapshot_index > stopped_at + 64; }));
+  cluster.start(follower);
+  EXPECT_TRUE(LocalCluster::eventually([&] { return converged(cluster, 3); }));
 }
 
 }  // namespace

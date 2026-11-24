@@ -57,6 +57,8 @@ int main(int argc, char** argv) {
   app.add_option("--listen", config.listen_host, "Address to accept peers on");
   app.add_option("--client-port", client_port, "Port the client gateway listens on");
   app.add_option("--tick-ms", tick_ms, "Raft tick interval")->check(CLI::Range(1U, 1000U));
+  app.add_option("--snapshot-every", config.snapshot_every,
+                 "Snapshot and compact the log every this many entries; 0 never");
   app.add_option("--max-entry-bytes", config.raft.max_entry_bytes,
                  "Command bytes packed into one log entry");
   app.add_option("--election-ticks", config.raft.election_ticks, "Ticks before an election")

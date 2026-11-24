@@ -37,6 +37,8 @@ struct NodeConfig {
   std::optional<int> storage_cpu;
   // Spin instead of sleeping when idle: lowest latency, one core always busy.
   bool busy_poll = false;
+  // Snapshot the replica and drop the log behind it every this many applied entries; 0 never.
+  std::uint64_t snapshot_every = 100'000;
 };
 
 // What the core thread last published, for health checks and tests.
@@ -47,6 +49,7 @@ struct NodeStatus {
   std::uint64_t commit = 0;
   std::uint64_t applied = 0;
   std::uint64_t replica_hash = 0;
+  std::uint64_t snapshot_index = 0;
 };
 
 // One replica: a network thread (Asio), a core thread that owns Raft and the engine, and a storage
@@ -93,6 +96,7 @@ class Node {
 
   void run(const std::stop_token& stop);
   bool propose_commands();
+  void maybe_compact();
   void handle_ready();
   bool release();
   void apply(const consensus::Entry& entry);
@@ -123,6 +127,7 @@ class Node {
     std::atomic<std::uint64_t> commit{0};
     std::atomic<std::uint64_t> applied{0};
     std::atomic<std::uint64_t> replica_hash{0};
+    std::atomic<std::uint64_t> snapshot_index{0};
   };
   Published published_;
   std::jthread core_;
