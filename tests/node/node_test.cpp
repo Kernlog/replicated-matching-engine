@@ -192,7 +192,8 @@ TEST(Node, FeedSeqsSurviveSnapshotsAndRestarts) {
   // replica state that snapshot carried.
   const std::uint64_t rejoined_at = cluster.node(follower).status().applied;
   submit_commands(cluster, leader, session, 601, 100, stream);
-  ASSERT_TRUE(LocalCluster::eventually([&] { return converged(cluster, 3); }));
+  ASSERT_TRUE(LocalCluster::eventually(
+      [&] { return applied_commands(cluster, leader, session) == 700 && converged(cluster, 3); }));
   const std::scoped_lock lock(mutex);
   std::size_t after_rejoin = 0;
   for (const auto& [index, first_seq] : seqs.at(follower - 1)) {
