@@ -64,7 +64,7 @@ bool converged(LocalCluster& cluster, std::uint32_t size) {
 TEST(Node, ThreeNodesElectReplicateAndAgreeOnTheBook) {
   LocalCluster cluster(3);
   ASSERT_TRUE(LocalCluster::eventually([&] { return cluster.leader().has_value(); }));
-  const std::uint32_t leader = *cluster.leader();
+  const std::uint32_t leader = cluster.leader().value_or(1);
   const std::uint64_t session = register_client(cluster, leader, 77);
   testing::CommandStream stream(5);
   submit_commands(cluster, leader, session, 1, 200, stream);
@@ -78,7 +78,7 @@ TEST(Node, ThreeNodesElectReplicateAndAgreeOnTheBook) {
 TEST(Node, RestartedFollowerRecoversFromDiskAndCatchesUp) {
   LocalCluster cluster(3);
   ASSERT_TRUE(LocalCluster::eventually([&] { return cluster.leader().has_value(); }));
-  const std::uint32_t leader = *cluster.leader();
+  const std::uint32_t leader = cluster.leader().value_or(1);
   const std::uint32_t follower = leader % 3 + 1;
   const std::uint64_t session = register_client(cluster, leader, 5);
   testing::CommandStream stream(9);

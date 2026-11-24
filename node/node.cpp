@@ -158,7 +158,7 @@ void Node::handle_ready() {
       held.last = {ready.entries.back().index, ready.entries.back().term};
     }
     work.entries = std::move(ready.entries);
-    storage_thread_->submit(std::move(work));
+    storage_thread_.value().submit(std::move(work));
   }
   held.seq = seq_;
   held.snapshot = std::move(ready.snapshot);
@@ -167,7 +167,7 @@ void Node::handle_ready() {
 }
 
 bool Node::release() {
-  const std::uint64_t synced = storage_thread_->synced();
+  const std::uint64_t synced = storage_thread_.value().synced();
   bool released = false;
   while (!held_.empty() && held_.front().seq <= synced) {
     Held& held = held_.front();

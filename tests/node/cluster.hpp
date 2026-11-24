@@ -24,7 +24,8 @@ inline std::uint16_t free_port() {
   sockaddr_in address{};
   address.sin_family = AF_INET;
   address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  ::bind(fd, reinterpret_cast<sockaddr*>(&address), sizeof address);  // NOLINT(*-reinterpret-cast)
+  static_cast<void>(::bind(fd, reinterpret_cast<sockaddr*>(&address),
+                           sizeof address));  // NOLINT(*-reinterpret-cast)
   socklen_t size = sizeof address;
   ::getsockname(fd, reinterpret_cast<sockaddr*>(&address), &size);  // NOLINT(*-reinterpret-cast)
   ::close(fd);
