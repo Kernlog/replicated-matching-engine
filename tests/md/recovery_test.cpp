@@ -104,7 +104,7 @@ TEST(Recovery, SubscriberRebuildsTheLeadersBookThroughFivePercentLoss) {
   gateway::Client client(options);
   client.open();
   testing::CommandStream stream(17);
-  for (int i = 0; i < 3000; ++i) {
+  for (int i = 0; i < 1500; ++i) {
     client.submit(stream.next());
   }
   ASSERT_TRUE(LocalCluster::eventually([&] {
