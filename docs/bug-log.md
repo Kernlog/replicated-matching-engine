@@ -43,3 +43,10 @@ Every bug found by fuzzing, the simulator or chaos runs, with the seed that foun
 - Root cause: a resend of a command that had already executed is acked as a duplicate with the resend's log index; the audit compared that index with the original execution
 - Fix: the history records duplicate acks separately; the audit matches them by events digest at any index and Porcupine leaves their position open
 - Regression: every chaos run since (kill and partition seeds, 0 violations)
+
+## B-007: a leader at its uncommitted limit dropped commands, poisoning pipelined sessions
+- Found by: the open-loop load generator at 50k commands/s on three local nodes
+- Symptom: 165 of 400,000 commands were never acked and 107,000 later ones came back out of order
+- Root cause: when `Raft::propose` refused a command at `max_uncommitted_entries`, the node dropped it; the session's next seq then skipped one, so the replica rejected every later command of that session
+- Fix: the core keeps the refused command and stops draining until Raft takes it, so the full ring pushes back on the gateway and TCP
+- Regression: `Node.LeaderAtItsUncommittedLimitHoldsCommandsInsteadOfDroppingThem`
