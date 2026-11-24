@@ -1,0 +1,40 @@
+x-node: &node
+  build: .
+  image: rme-node:local
+  restart: unless-stopped
+  stop_grace_period: 10s
+  cap_add: [NET_ADMIN]
+  networks: [cluster]
+  healthcheck:
+    test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/7000"]
+    interval: 2s
+    timeout: 1s
+    retries: 15
+
+services:
+  node1:
+    <<: *node
+    hostname: node1
+    command: [--id=1, --data-dir=/data, --client-port=7000, --member=node1:7100, --member=node2:7100, --member=node3:7100]
+    ports: ["7001:7000"]
+    volumes: [node1:/data]
+  node2:
+    <<: *node
+    hostname: node2
+    command: [--id=2, --data-dir=/data, --client-port=7000, --member=node1:7100, --member=node2:7100, --member=node3:7100]
+    ports: ["7002:7000"]
+    volumes: [node2:/data]
+  node3:
+    <<: *node
+    hostname: node3
+    command: [--id=3, --data-dir=/data, --client-port=7000, --member=node1:7100, --member=node2:7100, --member=node3:7100]
+    ports: ["7003:7000"]
+    volumes: [node3:/data]
+
+networks:
+  cluster:
+
+volumes:
+  node1:
+  node2:
+  node3:
