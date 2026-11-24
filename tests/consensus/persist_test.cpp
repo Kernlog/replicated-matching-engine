@@ -97,8 +97,8 @@ Raft leader_of_three() {
   process_ready(raft, ignore, ignore, ignore);
   const Index noop = raft.log().last_index();
   for (const std::uint32_t follower : {2U, 3U}) {
-    raft.step(
-        {NodeId(follower), NodeId(1), raft.term(), AppendResponse{true, noop, Index(0), Term(0)}});
+    raft.step({NodeId(follower), NodeId(1), raft.term(),
+               AppendResponse{true, noop, Index(0), Term(0), false}});
   }
   EXPECT_EQ(raft.commit(), noop);
   process_ready(raft, ignore, ignore, ignore);
@@ -122,7 +122,8 @@ TEST(SelfAckTest, LeaderCountsItselfOnlyAfterPersist) {
   ASSERT_TRUE(raft.propose(command));
   const Ready ready = raft.ready();
   const Index index = ready.entries.back().index;
-  raft.step({NodeId(2), NodeId(1), raft.term(), AppendResponse{true, index, Index(0), Term(0)}});
+  raft.step(
+      {NodeId(2), NodeId(1), raft.term(), AppendResponse{true, index, Index(0), Term(0), false}});
   EXPECT_EQ(raft.commit(), committed);
   raft.persisted(index);
   EXPECT_EQ(raft.commit(), index);
@@ -134,8 +135,8 @@ TEST(SelfAckTest, FollowersAloneFormAMajorityBeforeLeaderFsync) {
   ASSERT_TRUE(raft.propose(command));
   const Index index = raft.ready().entries.back().index;
   for (const std::uint32_t follower : {2U, 3U}) {
-    raft.step(
-        {NodeId(follower), NodeId(1), raft.term(), AppendResponse{true, index, Index(0), Term(0)}});
+    raft.step({NodeId(follower), NodeId(1), raft.term(),
+               AppendResponse{true, index, Index(0), Term(0), false}});
   }
   EXPECT_EQ(raft.commit(), index);
 }

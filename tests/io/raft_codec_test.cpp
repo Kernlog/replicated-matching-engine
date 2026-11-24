@@ -17,7 +17,8 @@ std::vector<Message> samples() {
       Message{NodeId(1), NodeId(2), Term(3), VoteRequest{Index(9), Term(2), true}},
       Message{NodeId(2), NodeId(1), Term(3), VoteResponse{true, false}},
       Message{NodeId(1), NodeId(3), Term(3), AppendRequest{Index(9), Term(2), {a, b}, Index(8)}},
-      Message{NodeId(3), NodeId(1), Term(3), AppendResponse{false, Index(4), Index(5), Term(1)}},
+      Message{NodeId(3), NodeId(1), Term(3),
+              AppendResponse{false, Index(4), Index(5), Term(1), true}},
       Message{NodeId(1), NodeId(2), Term(4),
               InstallSnapshot{Snapshot{Index(100), Term(4), std::vector<std::byte>(300)}}},
   };

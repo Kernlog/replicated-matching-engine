@@ -80,6 +80,9 @@ struct AppendResponse {
   Index match;
   Index conflict_index;
   Term conflict_term;
+  // The follower lost its durable state and is still recovering it. Its log is accurate, but it
+  // may have helped commit entries it no longer holds, so its match must not count toward commit.
+  bool recovering = false;
 
   friend bool operator==(const AppendResponse&, const AppendResponse&) = default;
 };
