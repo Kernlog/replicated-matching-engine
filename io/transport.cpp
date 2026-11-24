@@ -43,6 +43,7 @@ struct Transport::Peer {
   std::vector<std::vector<std::byte>> queued;
   std::vector<std::vector<std::byte>> writing;
   std::vector<std::vector<std::byte>> spare;
+  std::vector<asio::const_buffer> buffers;
   bool connected = false;
 };
 
@@ -186,19 +187,18 @@ asio::awaitable<void> Transport::write_loop(Peer* peer) {
       co_await peer->wake.async_wait(kNoThrow);
     }
     std::swap(peer->queued, peer->writing);
-    bool failed = false;
+    peer->buffers.clear();
+    for (const std::vector<std::byte>& frame : peer->writing) {
+      peer->buffers.emplace_back(frame.data(), frame.size());
+    }
+    auto [error, written] = co_await asio::async_write(peer->socket, peer->buffers, kNoThrow);
+    ++stats_.writes;
+    stats_.frames_sent += error ? 0 : peer->writing.size();
     for (std::vector<std::byte>& frame : peer->writing) {
-      if (!failed) {
-        auto [error, written] = co_await asio::async_write(
-            peer->socket, asio::buffer(frame.data(), frame.size()), kNoThrow);
-        failed = static_cast<bool>(error);
-        ++stats_.writes;
-        stats_.frames_sent += failed ? 0 : 1;
-      }
       peer->spare.push_back(std::move(frame));
     }
     peer->writing.clear();
-    if (failed) {
+    if (error) {
       co_return;
     }
   }
