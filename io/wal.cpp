@@ -117,7 +117,13 @@ void Wal::replay() {
     }
   }
   std::ranges::sort(paths);
+  released_ = !paths.empty() && std::stoull(paths.front().stem().string()) > 1;
   for (std::size_t i = 0; i < paths.size(); ++i) {
+    if (i != 0) {
+      closed_.push_back({.sequence = sequence_, .last_index = last_index_});
+    }
+    sequence_ = std::stoull(paths[i].stem().string());
+    last_index_ = 0;
     const std::vector<std::byte> data = read_file(paths[i]);
     const auto [end, torn] = replay_segment(paths[i], data);
     const bool rest_written = !all_zero(std::span(data).subspan(end));
@@ -135,9 +141,13 @@ void Wal::replay() {
     }
     offset_ = end;
   }
+  if (released_ && !entries_.empty() &&
+      entries_.front().index != mark_index_ + consensus::Index(1)) {
+    throw std::runtime_error("wal does not continue its snapshot mark at " +
+                             std::to_string(mark_index_.value()));
+  }
   if (!paths.empty()) {
     current_.emplace(paths.back(), O_RDWR);
-    sequence_ = std::stoull(paths.back().stem().string());
     if (std::filesystem::file_size(paths.back()) < options_.segment_bytes) {
       preallocate(current_->fd(), options_.segment_bytes);
       sync_file(current_->fd());
@@ -181,6 +191,7 @@ void Wal::apply(const RecordHeader& header, std::span<const std::byte> body) {
   const consensus::Index first =
       entries_.empty() ? mark_index_ + consensus::Index(1) : entries_.front().index;
   if (header.kind == RecordKind::kSnapshot) {
+    mark_sequence_ = sequence_;
     const bool held = !entries_.empty() && first <= index && index <= entries_.back().index &&
                       entries_[(index - first).value()].term == term;
     if (held) {
@@ -196,12 +207,16 @@ void Wal::apply(const RecordHeader& header, std::span<const std::byte> body) {
   const bool started = !entries_.empty() || mark_index_ != consensus::Index(0);
   if (started) {
     const consensus::Index last = entries_.empty() ? mark_index_ : entries_.back().index;
-    if (index <= mark_index_ || index > last + consensus::Index(1)) {
+    // Once early segments are released, a kept segment can open with records that follow entries
+    // released with them; a later mark covers every such entry, so the gap starts the log over.
+    const bool gap = index > last + consensus::Index(1);
+    if (index <= mark_index_ || (gap && !released_)) {
       throw std::runtime_error("wal entry " + std::to_string(index.value()) + " after " +
                                std::to_string(last.value()));
     }
-    entries_.resize(index < first ? 0 : (index - first).value());
+    entries_.resize(gap || index < first ? 0 : (index - first).value());
   }
+  last_index_ = std::max(last_index_, index.value());
   entries_.push_back(consensus::Entry{
       .term = term, .index = index, .type = header.entry_type, .data = {body.begin(), body.end()}});
 }
@@ -216,6 +231,7 @@ void Wal::append(std::span<const consensus::Entry> entries) {
     }
     stage(make_header(RecordKind::kEntry, entry.term, entry.index, entry.type, entry.data.size()),
           entry.data);
+    last_index_ = std::max(last_index_, entry.index.value());
   }
   flush();
 }
@@ -226,6 +242,9 @@ void Wal::mark_snapshot(consensus::Index index, consensus::Term term) {
   }
   stage(make_header(RecordKind::kSnapshot, term, index, consensus::EntryType::kNoop, 0), {});
   flush();
+  mark_index_ = index;
+  mark_term_ = term;
+  mark_sequence_ = sequence_;
 }
 
 void Wal::stage(const RecordHeader& header, std::span<const std::byte> body) {
@@ -265,6 +284,8 @@ void Wal::flush() {
 void Wal::roll() {
   if (current_) {
     unsynced_.push_back(std::move(*current_));
+    closed_.push_back({.sequence = sequence_, .last_index = last_index_});
+    last_index_ = 0;
   }
   ++sequence_;
   const std::filesystem::path path = segment_path(dir_, sequence_);
@@ -279,10 +300,32 @@ void Wal::sync() {
   flush();
   for (const log::File& file : unsynced_) {
     sync_data(file.fd());
+#if defined(__linux__)
+    // A closed segment is only read again on restart, so its synced pages need not stay cached.
+    ::posix_fadvise(file.fd(), 0, 0, POSIX_FADV_DONTNEED);
+#endif
   }
   unsynced_.clear();
   sync_data(current().fd());
   ++stats_.syncs;
+  release();
+}
+
+// A closed segment older than the one holding the latest snapshot mark, whose entries all sit
+// below that mark, is never needed again. The entry at the mark itself stays: replay checks its
+// term to decide whether the entries after the mark survive.
+void Wal::release() {
+  std::uint64_t removed = 0;
+  while (!closed_.empty() && closed_.front().sequence < mark_sequence_ &&
+         closed_.front().last_index < mark_index_.value()) {
+    std::filesystem::remove(segment_path(dir_, closed_.front().sequence));
+    closed_.erase(closed_.begin());
+    ++removed;
+  }
+  if (removed != 0) {
+    sync_dir(dir_);
+    stats_.segments_removed += removed;
+  }
 }
 
 }  // namespace rme::io
