@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           status=0
-          for faults in kill partition latency,pause kill,partition,latency,pause; do
+          for faults in kill partition latency,pause wipe kill,partition,latency,pause,wipe; do
             for seed in 1 2; do
               out="chaos/runs/${faults//,/-}-$seed"
               FAULTS=$faults SEED=$seed OUT=$out SECONDS_PER_RUN=60 chaos/run.sh

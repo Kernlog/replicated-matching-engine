@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fault injection against the compose cluster while chaos_client records a history.
 
-usage: nemesis.py --faults kill,partition,latency,pause --seconds 60 --seed 1 --out run/
+usage: nemesis.py --faults kill,partition,latency,pause,wipe --seconds 60 --seed 1 --out run/
 
 Each fault holds for 1-4 s, then heals, then the cluster gets 1-3 s of calm. Every fault and heal
 is written to nemesis.tsv in the output directory with its time, so a failing history can be lined
@@ -76,6 +76,21 @@ class Nemesis:
             root(node, "tc", "qdisc", "del", "dev", "eth0", "root")
             self.note(f"heal latency {node}")
         return heal
+
+    def wipe(self):
+        # Two lost nodes out of three cannot elect anyone, so one recovers before the next goes.
+        recovering = [n for n in NODES if subprocess.run(
+            ["docker", "compose", "exec", "-T", n, "test", "-f", "/data/LOST_STATE"],
+            capture_output=True).returncode == 0]
+        if recovering:
+            self.note(f"wipe skipped: {' '.join(recovering)} still recovering")
+            return lambda: None
+        node = self.rng.choice(NODES)
+        sh("docker", "kill", "-s", "KILL", container(node), check=False)
+        sh("docker", "compose", "run", "--rm", "--no-deps", "--entrypoint", "sh", node, "-c",
+           "rm -rf /data/* && touch /data/LOST_STATE")
+        self.note(f"wipe {node}")
+        return lambda: (sh("docker", "compose", "start", node), self.note(f"start {node}"))
 
     def pause(self):
         node = self.rng.choice(NODES)

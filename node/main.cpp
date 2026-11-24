@@ -68,6 +68,8 @@ int main(int argc, char** argv) {
   bool lock_memory = false;
   app.add_option("--cpus", cpus, "CPUs for the core, network and storage threads")->expected(3);
   app.add_flag("--busy-poll", config.busy_poll, "Spin the core thread instead of sleeping");
+  app.add_flag("--lost-state", config.raft.lost_state,
+               "This node's disk was lost: stay out of votes and quorums until it recovers");
   app.add_flag("--mlock", lock_memory, "Lock all memory after startup (needs IPC_LOCK)");
   app.add_option("--log-level", level, "trace, debug, info, warn or error");
   CLI11_PARSE(app, argc, argv);

@@ -6,6 +6,8 @@
 
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -96,6 +98,20 @@ class LocalCluster {
     }
     nodes_[id - 1]->start();
     gateways_[id - 1]->start(*nodes_[id - 1]);
+  }
+
+  // Loses every byte the node stored and brings it back as an operator would after a disk loss.
+  void wipe(std::uint32_t id) {
+    stop(id);
+    for (const auto& item : std::filesystem::directory_iterator(dirs_[id - 1].path())) {
+      std::filesystem::remove_all(item.path());
+    }
+    std::ofstream(dirs_[id - 1].path() / "LOST_STATE").flush();
+    start(id);
+  }
+
+  [[nodiscard]] const std::filesystem::path& data_dir(std::uint32_t id) const {
+    return dirs_[id - 1].path();
   }
 
   // The gateway's thread stops first so nothing calls into the node, then the node, whose core
