@@ -58,6 +58,9 @@ class Replica {
                                                       ReplicaConfig config = {});
 
   [[nodiscard]] std::uint64_t applied_index() const noexcept { return applied_index_; }
+  // Records sequenced so far: one per client record, one per entry without any. The market data
+  // feed numbers its messages by this, and snapshots carry it, so the numbering survives restarts.
+  [[nodiscard]] std::uint64_t sequenced() const noexcept { return sequenced_; }
   [[nodiscard]] const OrderBook& book() const noexcept { return book_; }
 
  private:
@@ -74,6 +77,7 @@ class Replica {
   std::map<std::uint64_t, Session> sessions_;
   std::set<std::pair<std::uint64_t, std::uint64_t>> by_last_index_;
   std::uint64_t applied_index_ = 0;
+  std::uint64_t sequenced_ = 0;
 };
 
 }  // namespace rme::engine

@@ -32,9 +32,6 @@ class Gateway {
   // Runs on the node's core thread; pass it to the Node before start.
   [[nodiscard]] node::Node::OutcomeHandler outcome_handler();
 
-  // Core thread: the feed seq that follows the last applied entry, for snapshot replies.
-  void feed_seq(std::function<std::uint64_t()> next_seq) { next_seq_ = std::move(next_seq); }
-
   void start(node::Node& node);
   void stop();
 
@@ -53,7 +50,6 @@ class Gateway {
   asio::io_context io_{1};
   asio::ip::tcp::acceptor acceptor_;
   node::Node* node_ = nullptr;
-  std::function<std::uint64_t()> next_seq_;
   SpscQueue<Ack> acks_{8192};
   alignas(kFalseSharingRange) std::atomic<bool> drain_posted_{false};
   std::map<std::uint64_t, std::weak_ptr<Connection>> registering_;

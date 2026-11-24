@@ -48,10 +48,10 @@ void Publisher::stop() {
   }
 }
 
-void Publisher::publish(std::uint64_t index, std::span<const std::byte> data) noexcept {
+void Publisher::publish(std::uint64_t first_seq, std::uint64_t index,
+                        std::span<const std::byte> data) noexcept {
   split_.clear();
-  split_entry(next_seq_, index, data, split_);
-  next_seq_ += split_.size();
+  split_entry(first_seq, index, data, split_);
   const std::size_t pushed = queue_.push_n(split_);
   dropped_ += split_.size() - pushed;
 }

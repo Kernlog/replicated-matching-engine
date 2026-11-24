@@ -3,7 +3,10 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
+#include <map>
+#include <mutex>
 #include <vector>
 
 #include "codec/client_record.hpp"
@@ -156,6 +159,50 @@ TEST(Node, FollowerBehindTheLeadersSnapshotCatchesUp) {
       [&] { return cluster.node(leader).status().snapshot_index > stopped_at + 64; }));
   cluster.start(follower);
   EXPECT_TRUE(LocalCluster::eventually([&] { return converged(cluster, 3); }));
+}
+
+// Feed seqs come from the replica, which snapshots carry, so a follower that restarts from its own
+// snapshot and then installs the leader's numbers every entry exactly as the leader did.
+TEST(Node, FeedSeqsSurviveSnapshotsAndRestarts) {
+  std::mutex mutex;
+  std::array<std::map<std::uint64_t, std::uint64_t>, 3> seqs;
+  LocalCluster cluster(
+      3,
+      [&](std::uint32_t id, Node& node, gateway::Gateway&) {
+        node.on_entry([&, id](const consensus::Entry& entry, std::uint64_t first_seq) {
+          const std::scoped_lock lock(mutex);
+          seqs.at(id - 1)[entry.index.value()] = first_seq;
+        });
+      },
+      compacting());
+  ASSERT_TRUE(LocalCluster::eventually([&] { return cluster.leader().has_value(); }));
+  const std::uint32_t leader = cluster.leader().value_or(1);
+  const std::uint32_t follower = leader % 3 + 1;
+  const std::uint64_t session = register_client(cluster, leader, 23);
+  testing::CommandStream stream(8);
+  submit_commands(cluster, leader, session, 1, 200, stream);
+  ASSERT_TRUE(LocalCluster::eventually([&] { return converged(cluster, 3); }));
+  cluster.stop(follower);
+  submit_commands(cluster, leader, session, 201, 400, stream);
+  ASSERT_TRUE(
+      LocalCluster::eventually([&] { return applied_commands(cluster, leader, session) == 600; }));
+  cluster.start(follower);
+  ASSERT_TRUE(LocalCluster::eventually([&] { return converged(cluster, 3); }));
+  // The follower is now past the leader's snapshot, so what it applies next is numbered from the
+  // replica state that snapshot carried.
+  const std::uint64_t rejoined_at = cluster.node(follower).status().applied;
+  submit_commands(cluster, leader, session, 601, 100, stream);
+  ASSERT_TRUE(LocalCluster::eventually(
+      [&] { return applied_commands(cluster, leader, session) == 700 && converged(cluster, 3); }));
+  const std::scoped_lock lock(mutex);
+  std::size_t after_rejoin = 0;
+  for (const auto& [index, first_seq] : seqs.at(follower - 1)) {
+    const auto found = seqs.at(leader - 1).find(index);
+    ASSERT_NE(found, seqs.at(leader - 1).end()) << "index " << index;
+    EXPECT_EQ(first_seq, found->second) << "index " << index;
+    after_rejoin += index > rejoined_at ? 1U : 0U;
+  }
+  EXPECT_GE(after_rejoin, 20U);
 }
 
 }  // namespace

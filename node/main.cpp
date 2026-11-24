@@ -99,9 +99,10 @@ int main(int argc, char** argv) {
     if (!md_target.empty()) {
       const rme::io::PeerAddress target = parse_member(0, md_target);
       publisher.emplace(target.host, target.port);
-      node.on_entry([&publisher](const rme::consensus::Entry& entry) {
-        publisher->publish(entry.index.value(),
-                           entry.data);  // NOLINT(bugprone-unchecked-optional-access)
+      node.on_entry([&publisher](const rme::consensus::Entry& entry, std::uint64_t first_seq) {
+        publisher->publish(first_seq,
+                           entry.index.value(),  // NOLINT(bugprone-unchecked-optional-access)
+                           entry.data);
       });
     }
     if (lock_memory) {

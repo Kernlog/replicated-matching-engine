@@ -1,5 +1,6 @@
 #include "engine/replica.hpp"
 
+#include <algorithm>
 #include <utility>
 
 #include "codec/batch.hpp"
@@ -14,7 +15,7 @@ namespace rme::engine {
 
 namespace {
 
-constexpr std::uint32_t kReplicaVersion = 1;
+constexpr std::uint32_t kReplicaVersion = 2;
 constexpr std::uint64_t kPositionBits = 20;
 constexpr std::uint64_t kMaxBatchCommands = std::uint64_t{1} << kPositionBits;
 constexpr std::uint64_t kMaxLogIndex = std::uint64_t{1} << (64 - kPositionBits);
@@ -42,6 +43,7 @@ void Replica::apply(std::uint64_t log_index, std::span<const std::byte> batch,
   applied_index_ = log_index;
   expire(log_index);
   const std::size_t count = batch.size() / codec::kClientRecordSize;
+  sequenced_ += std::max<std::uint64_t>(count, 1);
   if (count > kMaxBatchCommands) {
     return;
   }
@@ -121,12 +123,13 @@ std::uint64_t Replica::hash() const {
 
 std::vector<std::byte> Replica::snapshot() const {
   const std::vector<std::byte> book = engine::snapshot(book_);
-  std::size_t size = 2 * sizeof(std::uint64_t) + book.size();
+  std::size_t size = 3 * sizeof(std::uint64_t) + book.size();
   for (const auto& entry : sessions_) {
     size += 4 * sizeof(std::uint64_t) + entry.second.events.size() * kEventSize;
   }
   wire::Writer out(kReplicaVersion, size);
   out.u64(applied_index_);
+  out.u64(sequenced_);
   out.u64(sessions_.size());
   for (const auto& [id, session] : sessions_) {
     out.u64(id);
@@ -146,6 +149,7 @@ std::vector<std::byte> Replica::snapshot() const {
 std::optional<Replica> Replica::restore(std::span<const std::byte> bytes, ReplicaConfig config) {
   wire::Reader in(bytes, kReplicaVersion);
   const std::uint64_t applied_index = in.u64();
+  const std::uint64_t sequenced = in.u64();
   const std::uint64_t session_count = in.u64();
   std::map<std::uint64_t, Session> sessions;
   for (std::uint64_t i = 0; i < session_count && in.ok(); ++i) {
@@ -188,6 +192,7 @@ std::optional<Replica> Replica::restore(std::span<const std::byte> bytes, Replic
     replica.by_last_index_.emplace(session.last_index, id);
   }
   replica.applied_index_ = applied_index;
+  replica.sequenced_ = sequenced;
   return replica;
 }
 

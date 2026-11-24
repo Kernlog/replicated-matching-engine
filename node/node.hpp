@@ -58,8 +58,10 @@ struct NodeStatus {
 class Node {
  public:
   using OutcomeHandler = std::function<void(std::uint64_t index, const engine::Outcome&)>;
-  using EntryHandler = std::function<void(const consensus::Entry&)>;
-  using SnapshotHandler = std::function<void(std::uint64_t applied, std::vector<std::byte> image)>;
+  // first_seq numbers the entry's first sequenced record (see Replica::sequenced).
+  using EntryHandler = std::function<void(const consensus::Entry&, std::uint64_t first_seq)>;
+  using SnapshotHandler = std::function<void(std::uint64_t applied, std::uint64_t next_seq,
+                                             std::vector<std::byte> image)>;
 
   Node(NodeConfig config, OutcomeHandler on_outcome = {});
   Node(const Node&) = delete;

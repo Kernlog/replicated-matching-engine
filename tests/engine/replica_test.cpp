@@ -301,6 +301,20 @@ TEST(ReplicaTest, IdenticalLogsExpireIdentically) {
   EXPECT_NE(never_expires.hash(), a.hash());
 }
 
+TEST(ReplicaTest, CountsSequencedRecordsAcrossSnapshots) {
+  Replica replica;
+  std::vector<Outcome> out;
+  replica.apply(1, {}, out);
+  const std::array register_twice{codec::encode_register(1), codec::encode_register(2)};
+  replica.apply(2, std::as_bytes(std::span(register_twice)), out);
+  EXPECT_EQ(replica.sequenced(), 3U);
+  std::optional<Replica> copy = Replica::restore(replica.snapshot());
+  ASSERT_TRUE(copy.has_value());
+  Replica restored = std::move(copy).value_or(Replica{});
+  restored.apply(3, {}, out);
+  EXPECT_EQ(restored.sequenced(), 4U);
+}
+
 TEST(ReplicaTest, RejectsCorruptAndTruncatedSnapshots) {
   const std::vector<Bytes> log = Workload(4, {}).log(40);
   Replica replica;
