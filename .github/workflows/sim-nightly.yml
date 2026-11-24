@@ -35,7 +35,10 @@ jobs:
       - name: 12,500 swarm seeds
         shell: bash
         run: |
-          base=$(( ${{ matrix.shard }} * 12500 ))
+          # A new block of 100,000 seeds every night; failures name their seeds, so any of them
+          # replays exactly and goes into tests/sim/regression_test.cpp once fixed.
+          day=$(( $(date -u +%s) / 86400 ))
+          base=$(( day * 100000 + ${{ matrix.shard }} * 12500 ))
           seq 0 3 | xargs -P 4 -I{} sh -c \
             "build/release/tools/sim --seeds \$(( $base + {} * 3125 + 1 ))..\$(( $base + {} * 3125 + 3125 )) > part-{}.txt" || true
           cat part-*.txt | grep -A8 ' FAIL$' > failures.txt || true
