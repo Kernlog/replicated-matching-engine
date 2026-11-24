@@ -6,10 +6,10 @@ usage: bench/failover.py [runs] ; BIN=build/release, DATA_ROOT=/dev/shm
 """
 import os
 import pathlib
-import random
 import re
 import shutil
 import signal
+import socket
 import statistics
 import subprocess
 import sys
@@ -30,17 +30,27 @@ def leader_of(logs):
     return best[1]
 
 
-def one_run(seed):
+def free_ports(count):
+    sockets = [socket.socket() for _ in range(count)]
+    for s in sockets:
+        s.bind(("127.0.0.1", 0))
+    ports = [s.getsockname()[1] for s in sockets]
+    for s in sockets:
+        s.close()
+    return ports
+
+
+def one_run():
     work = pathlib.Path(tempfile.mkdtemp(dir=ROOT))
-    base = 30000 + random.Random(seed).randrange(20000)
-    members = [f"--member=127.0.0.1:{base + i}" for i in (1, 2, 3)]
+    ports = free_ports(6)
+    members = [f"--member=127.0.0.1:{ports[i - 1]}" for i in (1, 2, 3)]
     procs, logs = {}, {}
     try:
         for i in (1, 2, 3):
             logs[i] = work / f"node{i}.log"
             procs[i] = subprocess.Popen(
                 [BIN / "node/rme_node", f"--id={i}", f"--data-dir={work / str(i)}",
-                 "--listen=127.0.0.1", f"--client-port={base + 10 + i}", *members],
+                 "--listen=127.0.0.1", f"--client-port={ports[2 + i]}", *members],
                 stdout=open(logs[i], "w"), stderr=subprocess.STDOUT)
         deadline = time.monotonic() + 5
         while leader_of(logs) is None and time.monotonic() < deadline:
@@ -50,7 +60,7 @@ def one_run(seed):
         history = work / "history.tsv"
         client = subprocess.Popen(
             [BIN / "tools/chaos_client", "--workers=1", "--seconds=3", f"--out={history}",
-             *[f"--member=127.0.0.1:{base + 10 + i}" for i in (1, 2, 3)]])
+             *[f"--member=127.0.0.1:{ports[2 + i]}" for i in (1, 2, 3)]])
         time.sleep(1.0)
         leader = leader_of(logs)
         procs[leader].send_signal(signal.SIGKILL)
@@ -68,7 +78,12 @@ def one_run(seed):
 
 def main():
     runs = int(sys.argv[1]) if len(sys.argv) > 1 else 100
-    gaps = [one_run(seed) for seed in range(runs)]
+    gaps = []
+    while len(gaps) < runs:
+        try:
+            gaps.append(one_run())
+        except RuntimeError as error:
+            print(f"retrying: {error}", file=sys.stderr)
     gaps.sort()
     q = lambda p: gaps[min(len(gaps) - 1, int(p * len(gaps)))]
     print(f"runs={runs} failover_ms p50={q(0.5):.0f} p90={q(0.9):.0f} p99={q(0.99):.0f} "
