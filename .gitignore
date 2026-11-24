@@ -68,3 +68,5 @@ vcpkg_installed/
 notes/
 spec/states/
 spec/*_TTrace_*
+chaos/runs/
+!chaos/porcupine/go.mod
