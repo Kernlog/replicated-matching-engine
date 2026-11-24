@@ -7,6 +7,7 @@
 #include <variant>
 
 #include "core/assert.hpp"
+#include "io/affinity.hpp"
 
 namespace rme::node {
 
@@ -69,9 +70,12 @@ Node::~Node() {
 }
 
 void Node::start() {
-  storage_thread_.emplace(storage_);
-  transport_.start();
-  core_ = std::jthread([this](const std::stop_token& stop) { run(stop); });
+  storage_thread_.emplace(storage_, std::function<void()>{}, 1024, config_.storage_cpu);
+  transport_.start(config_.network_cpu);
+  core_ = std::jthread([this](const std::stop_token& stop) {
+    io::pin_this_thread(config_.core_cpu);
+    run(stop);
+  });
 }
 
 void Node::stop() {
@@ -134,7 +138,7 @@ void Node::run(const std::stop_token& stop) {
       idle = 0;
     } else if (++idle == 1) {
       published_.replica_hash.store(replica_.hash(), std::memory_order_relaxed);
-    } else if (idle < kSpinsBeforeSleep) {
+    } else if (config_.busy_poll || idle < kSpinsBeforeSleep) {
       cpu_relax();
     } else {
       std::this_thread::sleep_for(kIdleSleep);

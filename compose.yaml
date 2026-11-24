@@ -3,7 +3,7 @@ x-node: &node
   image: rme-node:local
   restart: unless-stopped
   stop_grace_period: 10s
-  cap_add: [NET_ADMIN]
+  cap_add: [NET_ADMIN, IPC_LOCK]
   networks: [cluster]
   healthcheck:
     test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/7000"]

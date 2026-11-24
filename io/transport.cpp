@@ -12,6 +12,7 @@
 #include <chrono>
 #include <utility>
 
+#include "io/affinity.hpp"
 #include "io/frame.hpp"
 #include "io/raft_codec.hpp"
 
@@ -66,12 +67,15 @@ void Transport::add_peer(PeerAddress address) {
   peers_.emplace(id, std::make_unique<Peer>(io_, std::move(address)));
 }
 
-void Transport::start() {
+void Transport::start(std::optional<int> cpu) {
   asio::co_spawn(io_, accept(), asio::detached);
   for (auto& [id, peer] : peers_) {
     asio::co_spawn(io_, dial(peer.get()), asio::detached);
   }
-  thread_ = std::jthread([this] { io_.run(); });
+  thread_ = std::jthread([this, cpu] {
+    pin_this_thread(cpu);
+    io_.run();
+  });
 }
 
 void Transport::stop() {

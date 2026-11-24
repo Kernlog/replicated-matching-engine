@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "core/assert.hpp"
+#include "io/affinity.hpp"
 
 namespace rme::io {
 
@@ -14,11 +15,11 @@ constexpr std::size_t kBatch = 256;
 }  // namespace
 
 StorageThread::StorageThread(DiskStorage& storage, std::function<void()> on_synced,
-                             std::size_t capacity)
-    : storage_(storage),
-      on_synced_(std::move(on_synced)),
-      queue_(capacity),
-      thread_([this] { run(); }) {}
+                             std::size_t capacity, std::optional<int> cpu)
+    : storage_(storage), on_synced_(std::move(on_synced)), queue_(capacity), thread_([this, cpu] {
+        pin_this_thread(cpu);
+        run();
+      }) {}
 
 StorageThread::~StorageThread() {
   queue_.push(StorageWork{});
