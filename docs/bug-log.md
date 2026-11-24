@@ -57,3 +57,11 @@ Every bug found by fuzzing, the simulator or chaos runs, with the seed that foun
 - Root cause: a leader cut off in term 72 kept replicating. Nodes 2 and 3 committed term 73 entries at 3079-3082; then node 3's disk was wiped and node 2 crashed. Recovering node 3 could not vote, but it still acknowledged node 1's conflicting term-72 entries, and node 1 counted those acks toward a majority and committed over term 73's entries
 - Fix: a recovering node marks its AppendEntries acks as recovering; the leader keeps replicating to it but leaves its match out of the commit quorum until recovery ends
 - Regression: `RecoveryTest.StaleLeaderCannotCommitThroughARecoveringFollower` (commit index reaches 6 without the fix, stays at 4 with it), `RecoveryTest.RecoveringFollowerMarksItsAcks`; seed 97276 passes
+
+## B-009: node shutdown hangs once the gateway stops draining acks
+- Found by: TSan on #103; `Node.WipedFollowerRecoversAndClearsItsMarker` ran into the 1,500 s CTest timeout
+- Symptom: the core thread spun forever inside the ack hand-off, so stopping the node never returned; the test harness had also already destroyed the gateway, and TSan reported the core writing into its freed queue
+- Root cause: the core pushed every outcome into the gateway's SPSC ring with a blocking push. Shutdown stops the gateway before the node, so after 8,192 queued acks nothing drained the ring
+- Fix: the core drops an ack the ring cannot take (the client's resend of that seq returns the cached result); the test cluster stops the gateway thread, then the node, and frees the gateway last
+- Regression: `Gateway.StoppedGatewayDropsAcksInsteadOfBlockingTheCore`
+
