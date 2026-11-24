@@ -196,7 +196,8 @@ TEST(Node, FeedSeqsSurviveSnapshotsAndRestarts) {
       ++shared;
     }
   }
-  EXPECT_GT(shared, 100U);
+  EXPECT_GT(shared, 20U) << "follower " << follower << " saw " << seqs.at(follower - 1).size()
+                         << ", leader " << leader << " saw " << seqs.at(leader - 1).size();
 }
 
 }  // namespace

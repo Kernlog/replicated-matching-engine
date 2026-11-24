@@ -310,8 +310,9 @@ TEST(ReplicaTest, CountsSequencedRecordsAcrossSnapshots) {
   EXPECT_EQ(replica.sequenced(), 3U);
   std::optional<Replica> copy = Replica::restore(replica.snapshot());
   ASSERT_TRUE(copy.has_value());
-  copy->apply(3, {}, out);
-  EXPECT_EQ(copy->sequenced(), 4U);
+  Replica restored = std::move(copy).value_or(Replica{});
+  restored.apply(3, {}, out);
+  EXPECT_EQ(restored.sequenced(), 4U);
 }
 
 TEST(ReplicaTest, RejectsCorruptAndTruncatedSnapshots) {
