@@ -7,11 +7,13 @@
 #include <csignal>
 #include <cstdint>
 #include <exception>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "gateway/gateway.hpp"
+#include "md/publisher.hpp"
 #include "node/node.hpp"
 
 namespace {
@@ -45,6 +47,7 @@ int main(int argc, char** argv) {
   std::uint32_t tick_ms = 10;
   std::uint16_t client_port = 7000;
   std::string level = "info";
+  std::string md_target;
   app.set_config("--config", "", "TOML or INI file with these options");
   app.add_option("--id", id, "This node's id, its position in --member")->required();
   app.add_option("--data-dir", data_dir, "Directory for the WAL, hard state and snapshot")
@@ -55,6 +58,7 @@ int main(int argc, char** argv) {
   app.add_option("--tick-ms", tick_ms, "Raft tick interval")->check(CLI::Range(1U, 1000U));
   app.add_option("--election-ticks", config.raft.election_ticks, "Ticks before an election")
       ->check(CLI::Range(2U, 1000U));
+  app.add_option("--md-target", md_target, "ip:port to publish the sequenced market data feed to");
   app.add_option("--log-level", level, "trace, debug, info, warn or error");
   CLI11_PARSE(app, argc, argv);
 
@@ -76,6 +80,15 @@ int main(int argc, char** argv) {
     }
     rme::gateway::Gateway gateway(config.listen_host, client_port);
     rme::node::Node node(config, gateway.outcome_handler());
+    std::optional<rme::md::Publisher> publisher;
+    if (!md_target.empty()) {
+      const rme::io::PeerAddress target = parse_member(0, md_target);
+      publisher.emplace(target.host, target.port);
+      node.on_entry([&publisher](const rme::consensus::Entry& entry) {
+        publisher->publish(entry.index.value(),
+                           entry.data);  // NOLINT(bugprone-unchecked-optional-access)
+      });
+    }
     node.start();
     gateway.start(node);
     spdlog::info("node {} started with {} members, data in {}", id, members.size(), data_dir);
