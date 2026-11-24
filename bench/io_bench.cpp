@@ -97,12 +97,13 @@ void transport_stream(benchmark::State& state) {
   constexpr std::uint64_t kMessages = 100'000;
   constexpr std::uint64_t kWindow = 2048;
   std::atomic<std::uint64_t> received{0};
-  rme::io::Transport receiver(
-      rme::consensus::NodeId(2), "127.0.0.1", 0,
-      [&received](rme::consensus::Message&&) { received.fetch_add(1, std::memory_order_relaxed); });
+  rme::io::Transport receiver(rme::consensus::NodeId(2), "127.0.0.1", 0,
+                              [&received](const rme::consensus::Message&) {
+                                received.fetch_add(1, std::memory_order_relaxed);
+                              });
   receiver.start();
   rme::io::Transport sender(rme::consensus::NodeId(1), "127.0.0.1", 0,
-                            [](rme::consensus::Message&&) {});
+                            [](const rme::consensus::Message&) {});
   sender.add_peer({rme::consensus::NodeId(2), "127.0.0.1", receiver.port()});
   sender.start();
   while (received.load() == 0) {
