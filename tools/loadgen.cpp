@@ -30,6 +30,12 @@ std::int64_t ns(Clock::time_point at) {
   return std::chrono::duration_cast<std::chrono::nanoseconds>(at.time_since_epoch()).count();
 }
 
+struct FileCloser {
+  void operator()(FILE* file) const noexcept {
+    static_cast<void>(std::fclose(file));  // NOLINT(cppcoreguidelines-owning-memory)
+  }
+};
+
 struct HistogramDeleter {
   void operator()(hdr_histogram* histogram) const noexcept { hdr_close(histogram); }
 };
@@ -163,6 +169,7 @@ int main(int argc, char** argv) {
   CLI11_PARSE(app, argc, argv);
 
   std::vector<rme::gateway::Endpoint> endpoints;
+  endpoints.reserve(members.size());
   for (const std::string& member : members) {
     endpoints.push_back(parse(member));
   }
@@ -236,9 +243,9 @@ int run(const std::vector<rme::gateway::Endpoint>& endpoints, double rate, doubl
             << " p99_us=" << us(99) << " p99.9_us=" << us(99.9) << " p99.99_us=" << us(99.99)
             << " max_us=" << static_cast<double>(hdr_max(merged.get())) / 1000.0 << '\n';
   if (!out.empty()) {
-    if (FILE* file = std::fopen(out.c_str(), "w")) {
-      hdr_percentiles_print(merged.get(), file, 5, 1000.0, CLASSIC);
-      std::fclose(file);
+    const std::unique_ptr<FILE, FileCloser> file(std::fopen(out.c_str(), "w"));
+    if (file) {
+      static_cast<void>(hdr_percentiles_print(merged.get(), file.get(), 5, 1000.0, CLASSIC));
     }
   }
   return applied == total ? 0 : 1;
