@@ -8,6 +8,8 @@
 
 #include "core/assert.hpp"
 #include "io/affinity.hpp"
+#include "io/atomic_file.hpp"
+#include "io/fs.hpp"
 
 namespace rme::node {
 
@@ -16,8 +18,15 @@ namespace {
 constexpr std::size_t kSpinsBeforeSleep = 20'000;
 constexpr auto kIdleSleep = std::chrono::microseconds(50);
 
+// Dropped by an operator (or --lost-state) after the node's disk was lost, and removed only once
+// recovery completes, so a crash partway through recovery cannot skip it.
+std::filesystem::path lost_marker(const NodeConfig& config) {
+  return config.data_dir / "LOST_STATE";
+}
+
 consensus::RaftConfig raft_config(const NodeConfig& config) {
   consensus::RaftConfig raft = config.raft;
+  raft.lost_state = raft.lost_state || std::filesystem::exists(lost_marker(config));
   raft.id = config.id;
   raft.members.clear();
   for (const io::PeerAddress& member : config.members) {
@@ -63,6 +72,11 @@ Node::Node(NodeConfig config, OutcomeHandler on_outcome)
     }
   }
   outcomes_.reserve(64);
+  if (raft_.recovering()) {
+    io::write_atomic(lost_marker(config_), {});
+    spdlog::warn("node {} lost its durable state; it will not vote until it recovers",
+                 config_.id.value());
+  }
 }
 
 Node::~Node() {
@@ -102,7 +116,8 @@ NodeStatus Node::status() const noexcept {
                     .commit = published_.commit.load(std::memory_order_relaxed),
                     .applied = published_.applied.load(std::memory_order_relaxed),
                     .replica_hash = published_.replica_hash.load(std::memory_order_relaxed),
-                    .snapshot_index = published_.snapshot_index.load(std::memory_order_relaxed)};
+                    .snapshot_index = published_.snapshot_index.load(std::memory_order_relaxed),
+                    .recovering = published_.recovering.load(std::memory_order_relaxed)};
 }
 
 void Node::run(const std::stop_token& stop) {
@@ -131,6 +146,7 @@ void Node::run(const std::stop_token& stop) {
     }
     busy = release() || busy;
     maybe_compact();
+    finish_recovery();
     if (sent_) {
       transport_.flush();
       sent_ = false;
@@ -220,6 +236,17 @@ void Node::maybe_compact() {
   storage_thread().submit(std::move(work));
 }
 
+void Node::finish_recovery() {
+  if (recovered_marker_ || raft_.recovering()) {
+    return;
+  }
+  recovered_marker_ = true;
+  if (std::filesystem::remove(lost_marker(config_))) {
+    io::sync_dir(config_.data_dir);
+    spdlog::info("node {} recovered and votes again", config_.id.value());
+  }
+}
+
 bool Node::release() {
   const std::uint64_t synced = storage_thread().synced();
   bool released = false;
@@ -274,6 +301,7 @@ void Node::publish() {
   published_.term.store(raft_.term().value(), std::memory_order_relaxed);
   published_.commit.store(raft_.commit().value(), std::memory_order_relaxed);
   published_.applied.store(replica_.applied_index(), std::memory_order_relaxed);
+  published_.recovering.store(raft_.recovering(), std::memory_order_relaxed);
   published_.snapshot_index.store(raft_.log().snapshot_index().value(), std::memory_order_relaxed);
 }
 

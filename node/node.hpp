@@ -50,6 +50,7 @@ struct NodeStatus {
   std::uint64_t applied = 0;
   std::uint64_t replica_hash = 0;
   std::uint64_t snapshot_index = 0;
+  bool recovering = false;
 };
 
 // One replica: a network thread (Asio), a core thread that owns Raft and the engine, and a storage
@@ -99,6 +100,7 @@ class Node {
   void run(const std::stop_token& stop);
   bool propose_commands();
   void maybe_compact();
+  void finish_recovery();
   void handle_ready();
   bool release();
   void apply(const consensus::Entry& entry);
@@ -120,6 +122,7 @@ class Node {
   std::deque<Held> held_;
   std::optional<std::vector<std::byte>> deferred_;
   std::uint64_t seq_ = 0;
+  bool recovered_marker_ = false;
   bool sent_ = false;
   std::vector<engine::Outcome> outcomes_;
   struct alignas(kFalseSharingRange) Published {
@@ -130,6 +133,7 @@ class Node {
     std::atomic<std::uint64_t> applied{0};
     std::atomic<std::uint64_t> replica_hash{0};
     std::atomic<std::uint64_t> snapshot_index{0};
+    std::atomic<bool> recovering{false};
   };
   Published published_;
   std::jthread core_;

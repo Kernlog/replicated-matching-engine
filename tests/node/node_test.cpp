@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <map>
 #include <mutex>
 #include <vector>
@@ -159,6 +160,26 @@ TEST(Node, FollowerBehindTheLeadersSnapshotCatchesUp) {
       [&] { return cluster.node(leader).status().snapshot_index > stopped_at + 64; }));
   cluster.start(follower);
   EXPECT_TRUE(LocalCluster::eventually([&] { return converged(cluster, 3); }));
+}
+
+// A follower that lost its disk comes back with only the operator's marker: it rejoins without
+// voting, catches up, and drops the marker once a leader of the current term confirms its log.
+TEST(Node, WipedFollowerRecoversAndClearsItsMarker) {
+  LocalCluster cluster(3, {}, compacting());
+  ASSERT_TRUE(LocalCluster::eventually([&] { return cluster.leader().has_value(); }));
+  const std::uint32_t leader = cluster.leader().value_or(1);
+  const std::uint32_t follower = leader % 3 + 1;
+  const std::uint64_t session = register_client(cluster, leader, 24);
+  testing::CommandStream stream(10);
+  submit_commands(cluster, leader, session, 1, 300, stream);
+  ASSERT_TRUE(LocalCluster::eventually([&] { return converged(cluster, 3); }));
+  cluster.wipe(follower);
+  submit_commands(cluster, leader, session, 301, 100, stream);
+  ASSERT_TRUE(LocalCluster::eventually([&] { return converged(cluster, 3); }));
+  EXPECT_TRUE(LocalCluster::eventually([&] {
+    return !cluster.node(follower).status().recovering &&
+           !std::filesystem::exists(cluster.data_dir(follower) / "LOST_STATE");
+  }));
 }
 
 // Feed seqs come from the replica, which snapshots carry, so a follower that restarts from its own
