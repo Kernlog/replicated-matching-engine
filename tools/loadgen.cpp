@@ -81,6 +81,7 @@ class Stream {
         return;
       }
       ++acked_;
+      applied_ += ack->result == rme::engine::SessionResult::kApplied ? 1 : 0;
       const std::int64_t intended = intended_[ack->seq].load(std::memory_order_acquire);
       if (intended >= 0) {
         hdr_record_value(histogram_.get(), ns(Clock::now()) - intended);
@@ -89,6 +90,7 @@ class Stream {
   }
 
   [[nodiscard]] std::uint64_t acked() const noexcept { return acked_; }
+  [[nodiscard]] std::uint64_t applied() const noexcept { return applied_; }
   [[nodiscard]] hdr_histogram* histogram() const noexcept { return histogram_.get(); }
   void close() {
     asio::error_code ignored;
@@ -120,6 +122,7 @@ class Stream {
   std::uint64_t session_ = 0;
   std::uint64_t sent_ = 0;
   std::uint64_t acked_ = 0;
+  std::uint64_t applied_ = 0;
 };
 
 rme::gateway::Endpoint parse(const std::string& text) {
@@ -216,15 +219,20 @@ int run(const std::vector<rme::gateway::Endpoint>& endpoints, double rate, doubl
   }
   Histogram merged = make_histogram();
   std::uint64_t acked = 0;
+  std::uint64_t applied = 0;
   for (const auto& stream : streams) {
     hdr_add(merged.get(), stream->histogram());
     acked += stream->acked();
+    applied += stream->applied();
   }
   const auto us = [&](double percentile) {
     return static_cast<double>(hdr_value_at_percentile(merged.get(), percentile)) / 1000.0;
   };
-  std::cout << "rate=" << rate << " sent=" << total << " acked=" << acked << " p50_us=" << us(50)
-            << " p99_us=" << us(99) << " p99.9_us=" << us(99.9) << " p99.99_us=" << us(99.99)
+  // Under overload the leader refuses proposals; every later seq of that session is then out of
+  // order, so only applied commands count.
+  std::cout << "rate=" << rate << " sent=" << total << " acked=" << acked << " applied=" << applied
+            << " p50_us=" << us(50) << " p99_us=" << us(99) << " p99.9_us=" << us(99.9)
+            << " p99.99_us=" << us(99.99)
             << " max_us=" << static_cast<double>(hdr_max(merged.get())) / 1000.0 << '\n';
   if (!out.empty()) {
     if (FILE* file = std::fopen(out.c_str(), "w")) {
@@ -232,7 +240,7 @@ int run(const std::vector<rme::gateway::Endpoint>& endpoints, double rate, doubl
       std::fclose(file);
     }
   }
-  return acked == total ? 0 : 1;
+  return applied == total ? 0 : 1;
 }
 
 }  // namespace
