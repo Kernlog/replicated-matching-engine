@@ -42,6 +42,7 @@ add_subdirectory(consensus)
 add_subdirectory(testing)
 add_subdirectory(sim)
 add_subdirectory(node)
+add_subdirectory(gateway)
 
 add_subdirectory(tools)
 

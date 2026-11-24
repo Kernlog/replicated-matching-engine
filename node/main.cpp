@@ -11,6 +11,7 @@
 #include <string_view>
 #include <vector>
 
+#include "gateway/gateway.hpp"
 #include "node/node.hpp"
 
 namespace {
@@ -42,6 +43,7 @@ int main(int argc, char** argv) {
   std::vector<std::string> members;
   rme::node::NodeConfig config;
   std::uint32_t tick_ms = 10;
+  std::uint16_t client_port = 7000;
   std::string level = "info";
   app.set_config("--config", "", "TOML or INI file with these options");
   app.add_option("--id", id, "This node's id, its position in --member")->required();
@@ -49,6 +51,7 @@ int main(int argc, char** argv) {
       ->required();
   app.add_option("--member", members, "host:port of every member in id order")->required();
   app.add_option("--listen", config.listen_host, "Address to accept peers on");
+  app.add_option("--client-port", client_port, "Port the client gateway listens on");
   app.add_option("--tick-ms", tick_ms, "Raft tick interval")->check(CLI::Range(1U, 1000U));
   app.add_option("--election-ticks", config.raft.election_ticks, "Ticks before an election")
       ->check(CLI::Range(2U, 1000U));
@@ -71,12 +74,15 @@ int main(int argc, char** argv) {
     for (std::size_t i = 0; i < members.size(); ++i) {
       config.members.push_back(parse_member(static_cast<std::uint32_t>(i + 1), members[i]));
     }
-    rme::node::Node node(config);
+    rme::gateway::Gateway gateway(config.listen_host, client_port);
+    rme::node::Node node(config, gateway.outcome_handler());
     node.start();
+    gateway.start(node);
     spdlog::info("node {} started with {} members, data in {}", id, members.size(), data_dir);
     int signal = 0;
     sigwait(&signals, &signal);
     spdlog::info("signal {}: draining", signal);
+    gateway.stop();
     node.stop();
     spdlog::info("node {} stopped cleanly", id);
   } catch (const std::exception& error) {

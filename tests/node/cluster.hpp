@@ -13,6 +13,7 @@
 #include <thread>
 #include <vector>
 
+#include "gateway/gateway.hpp"
 #include "node/node.hpp"
 #include "tests/io/temp_dir.hpp"
 
@@ -38,9 +39,11 @@ struct Recorded {
 
 class LocalCluster {
  public:
-  explicit LocalCluster(std::uint32_t size) : dirs_(size), outcomes_(size), nodes_(size) {
+  explicit LocalCluster(std::uint32_t size)
+      : dirs_(size), outcomes_(size), gateways_(size), nodes_(size) {
     for (std::uint32_t id = 1; id <= size; ++id) {
       members_.push_back({consensus::NodeId(id), "127.0.0.1", free_port()});
+      client_ports_.push_back(free_port());
     }
     for (std::uint32_t id = 1; id <= size; ++id) {
       start(id);
@@ -101,8 +104,10 @@ class LocalCluster {
   };
 
   std::vector<io::PeerAddress> members_;
+  std::vector<std::uint16_t> client_ports_;
   std::vector<io::TempDir> dirs_;
   std::vector<Sink> outcomes_;
+  std::vector<std::unique_ptr<gateway::Gateway>> gateways_;
   std::vector<std::unique_ptr<Node>> nodes_;
 };
 
