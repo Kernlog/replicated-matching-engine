@@ -8,7 +8,7 @@ namespace rme::engine {
 
 struct LimitOrder {
   OrderId id;
-  Side side;
+  Side side = Side::kBuy;
   Price price;
   Qty qty;
 
@@ -17,7 +17,7 @@ struct LimitOrder {
 
 struct MarketOrder {
   OrderId id;
-  Side side;
+  Side side = Side::kBuy;
   Qty qty;
 
   friend bool operator==(const MarketOrder&, const MarketOrder&) = default;
