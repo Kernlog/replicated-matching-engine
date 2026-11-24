@@ -96,7 +96,7 @@ def main():
         lines.append(f"| `{name}` | {label(metric)} | " + " | ".join(cells) + " |")
     lines += [
         "",
-        f"Medians of alternated base/head runs on one pinned core of a shared GitHub runner;"
+        f"Medians of alternated base/head runs on pinned cores of a shared GitHub runner;"
         f" changes within ±{NOISE:.0f}% are noise. Latency includes one `steady_clock` read per"
         f" command. Raw JSON is attached to the run as the `bench-results` artifact.",
     ]

@@ -96,6 +96,20 @@ jobs:
       - run: cmake --build --preset asan
       - run: ctest --preset asan
 
+  tsan:
+    runs-on: ubuntu-24.04
+    env:
+      CXX: clang++-18
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: clang-tsan
+      - run: cmake --preset tsan
+      - run: cmake --build --preset tsan
+      - run: ctest --preset tsan
+
   fuzz:
     runs-on: ubuntu-24.04
     env:
